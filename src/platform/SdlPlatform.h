@@ -4,12 +4,15 @@
 
 struct SDL_Window;
 struct SDL_Renderer;
+class SdlTexture;
 
 struct SdlFrameData {
     float dtSeconds = 0.0f;
     float timeSeconds = 0.0f;
     Input input;
 };
+
+struct SDL_Renderer;
 
 class SdlPlatform {
 public:
@@ -22,7 +25,10 @@ public:
     void BeginFrame();
     void DrawTestRect(float timeSeconds);
     void DrawPlayerRect(int x, int y);
+    SDL_Renderer* RendererRaw() const { return m_renderer; }
+    void GetWindowSize(int& outW, int& outH) const;
     void EndFrame();
+    void DrawSprite(const SdlTexture& tex, int x, int y);
 
 private:
     SDL_Window* m_window = nullptr;

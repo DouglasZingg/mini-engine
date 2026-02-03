@@ -45,7 +45,7 @@ void App::Run()
         if (accumulator > 0.25f) accumulator = 0.25f;
 
         while (accumulator >= fixedDt) {
-            game.Update(frame.input, fixedDt);
+            game.Update(g_platform, frame.input, fixedDt);
             accumulator -= fixedDt;
         }
 

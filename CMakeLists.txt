@@ -11,7 +11,10 @@ add_executable(mini_engine
     src/platform/SdlPlatform.cpp
     src/engine/Input.cpp
     src/game/Game.cpp
+    src/platform/SdlTexture.cpp
+    src/engine/Assets.cpp
 )
+
 
 target_include_directories(mini_engine PRIVATE src)
 

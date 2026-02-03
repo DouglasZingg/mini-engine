@@ -1,4 +1,5 @@
 #include "platform/SdlPlatform.h"
+#include "platform/SdlTexture.h"
 #include <SDL.h>
 #include <cstdio>
 #include <algorithm>
@@ -111,4 +112,19 @@ void SdlPlatform::DrawPlayerRect(int x, int y) {
     SDL_Rect r{ x, y, 40, 40 };
     SDL_SetRenderDrawColor(m_renderer, 80, 220, 140, 255);
     SDL_RenderFillRect(m_renderer, &r);
+}
+
+void SdlPlatform::GetWindowSize(int& outW, int& outH) const {
+    outW = 0; outH = 0;
+    if (m_window) {
+        SDL_GetWindowSize(m_window, &outW, &outH);
+    }
+}
+
+void SdlPlatform::DrawSprite(const SdlTexture& tex, int x, int y) {
+    SDL_Texture* t = tex.Raw();
+    if (!t) return;
+
+    SDL_Rect dst{ x, y, tex.Width(), tex.Height() };
+    SDL_RenderCopy(m_renderer, t, nullptr, &dst);
 }
