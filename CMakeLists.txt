@@ -9,6 +9,8 @@ add_executable(mini_engine
     src/main.cpp
     src/core/App.cpp
     src/platform/SdlPlatform.cpp
+    src/engine/Input.cpp
+    src/game/Game.cpp
 )
 
 target_include_directories(mini_engine PRIVATE src)

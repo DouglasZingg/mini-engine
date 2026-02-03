@@ -1,5 +1,7 @@
 #include "core/App.h"
 #include "platform/SdlPlatform.h"
+#include "game/Game.h"
+#include "engine/Time.h"
 #include <cstdio>
 
 static SdlPlatform g_platform;
@@ -13,8 +15,15 @@ bool App::Init(const AppConfig& cfg) {
     return true;
 }
 
-void App::Run() {
+void App::Run() 
+{
     std::printf("[INFO] Entering main loop\n");
+
+    Game game;
+    game.Init(g_platform);
+
+    const float fixedDt = 1.0f / 60.0f;
+    float accumulator = 0.0f;
 
     while (m_running) {
         SdlFrameData frame{};
@@ -23,12 +32,27 @@ void App::Run() {
             break;
         }
 
-        // Simple “render something” test: clear + draw a moving rect
+        // Allow App-level quit via input
+        if (frame.input.Down(Key::Escape)) {
+            m_running = false;
+            break;
+        }
+
+        // fixed timestep simulation
+        accumulator += frame.dtSeconds;
+
+        // prevent spiral of death
+        if (accumulator > 0.25f) accumulator = 0.25f;
+
+        while (accumulator >= fixedDt) {
+            game.Update(frame.input, fixedDt);
+            accumulator -= fixedDt;
+        }
+
+        const float alpha = accumulator / fixedDt;
+
         g_platform.BeginFrame();
-
-        // frame.dtSeconds is validated by tests below
-        g_platform.DrawTestRect(frame.timeSeconds);
-
+        game.Render(g_platform, alpha);
         g_platform.EndFrame();
     }
 }

@@ -1,18 +1,27 @@
-# build outputs
+# Build output
 /build/
 out/
+
+# vcpkg (manifest mode)
+vcpkg_installed/
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Binaries
 *.exe
 *.pdb
 *.ilk
 
-# CMake / VS
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-*.sln
-*.vcxproj*
-.vs/
-
 # OS junk
-.DS_Store
 Thumbs.db
+.DS_Store

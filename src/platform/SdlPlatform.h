@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "engine/Input.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -7,10 +8,7 @@ struct SDL_Renderer;
 struct SdlFrameData {
     float dtSeconds = 0.0f;
     float timeSeconds = 0.0f;
-    bool keyW = false;
-    bool keyA = false;
-    bool keyS = false;
-    bool keyD = false;
+    Input input;
 };
 
 class SdlPlatform {
@@ -23,6 +21,7 @@ public:
 
     void BeginFrame();
     void DrawTestRect(float timeSeconds);
+    void DrawPlayerRect(int x, int y);
     void EndFrame();
 
 private:

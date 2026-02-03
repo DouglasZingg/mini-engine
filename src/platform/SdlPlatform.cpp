@@ -59,10 +59,11 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     }
 
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    outFrame.keyW = keys[SDL_SCANCODE_W] != 0;
-    outFrame.keyA = keys[SDL_SCANCODE_A] != 0;
-    outFrame.keyS = keys[SDL_SCANCODE_S] != 0;
-    outFrame.keyD = keys[SDL_SCANCODE_D] != 0;
+    outFrame.input.SetKey(Key::W, keys[SDL_SCANCODE_W] != 0);
+    outFrame.input.SetKey(Key::A, keys[SDL_SCANCODE_A] != 0);
+    outFrame.input.SetKey(Key::S, keys[SDL_SCANCODE_S] != 0);
+    outFrame.input.SetKey(Key::D, keys[SDL_SCANCODE_D] != 0);
+    outFrame.input.SetKey(Key::Escape, keys[SDL_SCANCODE_ESCAPE] != 0);
 
     // lightweight verification logging (only occasionally)
     static float logTimer = 0.0f;
@@ -71,7 +72,10 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
         logTimer = 0.0f;
         std::printf("[INFO] dt=%.4f  t=%.2f  WASD=%d%d%d%d\n",
             outFrame.dtSeconds, outFrame.timeSeconds,
-            (int)outFrame.keyW, (int)outFrame.keyA, (int)outFrame.keyS, (int)outFrame.keyD);
+            (int)outFrame.input.Down(Key::W),
+            (int)outFrame.input.Down(Key::A),
+            (int)outFrame.input.Down(Key::S),
+            (int)outFrame.input.Down(Key::D));
     }
 
     return true;
@@ -101,4 +105,10 @@ void SdlPlatform::DrawTestRect(float timeSeconds) {
 
 void SdlPlatform::EndFrame() {
     SDL_RenderPresent(m_renderer);
+}
+
+void SdlPlatform::DrawPlayerRect(int x, int y) {
+    SDL_Rect r{ x, y, 40, 40 };
+    SDL_SetRenderDrawColor(m_renderer, 80, 220, 140, 255);
+    SDL_RenderFillRect(m_renderer, &r);
 }
