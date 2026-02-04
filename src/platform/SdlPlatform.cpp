@@ -11,12 +11,10 @@ bool SdlPlatform::Init(int w, int h, const char* title) {
         return false;
     }
 
-    m_window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        w, h, SDL_WINDOW_SHOWN);
-    if (!m_window) {
-        std::printf("[ERROR] SDL_CreateWindow failed: %s\n", SDL_GetError());
-        return false;
-    }
+    Uint32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP;
+    m_window = SDL_CreateWindow(title,
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        w, h, flags);
 
     m_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!m_renderer) {
@@ -121,10 +119,20 @@ void SdlPlatform::GetWindowSize(int& outW, int& outH) const {
     }
 }
 
-void SdlPlatform::DrawSprite(const SdlTexture& tex, int x, int y) {
+void SdlPlatform::DrawSprite(const SdlTexture& tex, int x, int y, float scale) {
     SDL_Texture* t = tex.Raw();
     if (!t) return;
 
-    SDL_Rect dst{ x, y, tex.Width(), tex.Height() };
+    SDL_Rect dst{
+        x,
+        y,
+        (int)(tex.Width() * scale),
+        (int)(tex.Height() * scale)
+    };
     SDL_RenderCopy(m_renderer, t, nullptr, &dst);
+}
+
+void SdlPlatform::DrawLine(int x1, int y1, int x2, int y2) {
+    SDL_SetRenderDrawColor(m_renderer, 40, 40, 50, 255);
+    SDL_RenderDrawLine(m_renderer, x1, y1, x2, y2);
 }

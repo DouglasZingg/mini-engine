@@ -28,7 +28,8 @@ public:
     SDL_Renderer* RendererRaw() const { return m_renderer; }
     void GetWindowSize(int& outW, int& outH) const;
     void EndFrame();
-    void DrawSprite(const SdlTexture& tex, int x, int y);
+    void DrawSprite(const SdlTexture& tex, int x, int y, float scale);
+    void DrawLine(int x1, int y1, int x2, int y2);
 
 private:
     SDL_Window* m_window = nullptr;
