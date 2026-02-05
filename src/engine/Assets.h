@@ -3,6 +3,10 @@
 
 class SdlPlatform;
 
+/**
+ * Simple asset container.
+ * For now this loads only the player BMP. Expand as the project grows.
+ */
 class Assets {
 public:
     bool Init(SdlPlatform& platform);

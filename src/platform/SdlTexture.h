@@ -1,9 +1,12 @@
 #pragma once
-#include <cstdint>
 
 struct SDL_Texture;
 class SdlPlatform;
 
+/**
+ * Minimal texture wrapper (BMP only for now).
+ * Owns an SDL_Texture and tracks width/height.
+ */
 class SdlTexture {
 public:
     bool LoadBMP(SdlPlatform& platform, const char* path);

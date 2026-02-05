@@ -1,7 +1,7 @@
 #include "core/App.h"
-#include "platform/SdlPlatform.h"
 #include "game/Game.h"
-#include "engine/Time.h"
+#include "platform/SdlPlatform.h"
+
 #include <cstdio>
 
 static SdlPlatform g_platform;
@@ -15,17 +15,21 @@ bool App::Init(const AppConfig& cfg) {
     return true;
 }
 
-void App::Run() 
-{
+void App::Run() {
     std::printf("[INFO] Entering main loop\n");
 
     Game game;
-    game.Init(g_platform);
+    if (!game.Init(g_platform)) {
+        std::printf("[ERROR] Game init failed\n");
+        return;
+    }
 
+    // Fixed timestep simulation parameters
     const float fixedDt = 1.0f / 60.0f;
     float accumulator = 0.0f;
 
     while (m_running) {
+        // ---- Poll platform ----
         SdlFrameData frame{};
         if (!g_platform.Pump(frame)) {
             m_running = false;
@@ -38,10 +42,10 @@ void App::Run()
             break;
         }
 
-        // fixed timestep simulation
+        // ---- Fixed timestep update ----
         accumulator += frame.dtSeconds;
 
-        // prevent spiral of death
+        // Prevent spiral of death if the app hitches
         if (accumulator > 0.25f) accumulator = 0.25f;
 
         while (accumulator >= fixedDt) {
@@ -49,8 +53,9 @@ void App::Run()
             accumulator -= fixedDt;
         }
 
-        const float alpha = accumulator / fixedDt;
+        const float alpha = (fixedDt > 0.0f) ? (accumulator / fixedDt) : 0.0f;
 
+        // ---- Render ----
         g_platform.BeginFrame();
         game.Render(g_platform, alpha);
         g_platform.EndFrame();

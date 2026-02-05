@@ -2,7 +2,7 @@
 #include "platform/SdlPlatform.h"
 
 bool Assets::Init(SdlPlatform& platform) {
-    // Keep paths simple for now; we’ll improve to a robust assets path later
+    // Keep paths simple for now; we assume the working directory is repo root.
     return m_player.LoadBMP(platform, "assets/player.bmp");
 }
 

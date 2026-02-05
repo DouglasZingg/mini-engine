@@ -9,21 +9,20 @@ add_executable(mini_engine
     src/main.cpp
     src/core/App.cpp
     src/platform/SdlPlatform.cpp
-    src/engine/Input.cpp
-    src/game/Game.cpp
     src/platform/SdlTexture.cpp
     src/engine/Assets.cpp
     src/engine/Config.cpp
+    src/engine/Input.cpp
+    src/game/Game.cpp
 )
-
 
 target_include_directories(mini_engine PRIVATE src)
 
-# SDL2 via vcpkg
+# SDL2 via vcpkg (manifest mode)
 find_package(SDL2 CONFIG REQUIRED)
 target_link_libraries(mini_engine PRIVATE SDL2::SDL2 SDL2::SDL2main)
 
-# Nice warnings (MSVC)
+# Nice warnings
 if (MSVC)
   target_compile_options(mini_engine PRIVATE /W4 /permissive-)
 else()
