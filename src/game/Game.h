@@ -41,4 +41,6 @@ private:
     int m_playerIndex = -1;
 
     float m_debugTimer = 0.0f;
+
+    bool m_showDebug = true;
 };

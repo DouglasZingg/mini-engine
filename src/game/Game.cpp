@@ -33,18 +33,18 @@ bool Game::Init(SdlPlatform& platform) {
     // Player
     Entity player{};
     player.type = EntityType::Player;
-    player.pos = { 500.0f, 500.0f };
+    player.pos = m_cfg.playerSpawn;
     player.prevPos = player.pos;
     player.radius = 20.0f;
 
     m_playerIndex = 0;
     m_entities.push_back(player);
 
-    // Enemies (static for now)
-    for (int i = 0; i < 5; ++i) {
+    // Enemies
+    for (const auto& sp : m_cfg.enemySpawns) {
         Entity e{};
         e.type = EntityType::Enemy;
-        e.pos = { 700.0f + i * 120.0f, 600.0f };
+        e.pos = sp.pos;
         e.prevPos = e.pos;
         e.radius = 18.0f;
         m_entities.push_back(e);
@@ -107,6 +107,14 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt) {
     if (input.Down(Key::S)) dir.y += 1.0f;
     if (input.Down(Key::A)) dir.x -= 1.0f;
     if (input.Down(Key::D)) dir.x += 1.0f;
+
+    static bool prevTab = false;
+    bool tabNow = input.Down(Key::Tab);
+
+    if (tabNow && !prevTab) {
+        m_showDebug = !m_showDebug;
+    }
+    prevTab = tabNow;
 
     // Integrate (no normalization: diagonal is faster; acceptable for prototype)
     player.pos = player.pos + dir * (m_playerSpeed * fixedDt);
@@ -190,5 +198,23 @@ void Game::Render(SdlPlatform& platform, float alpha) {
             const int drawY = (int)(screenPos.y - size * 0.5f);
             platform.DrawFilledRect(drawX, drawY, size, size, 200, 80, 80);
         }
+    }
+
+    if (m_showDebug) {
+        const int pad = 10;
+        const int boxW = 260;
+        const int boxH = 90;
+
+        platform.DrawFilledRect(pad, pad, boxW, boxH, 20, 20, 25);
+
+        const Entity& player = m_entities[m_playerIndex];
+        std::printf(
+            "[DBG] pos(%.1f, %.1f) entities=%zu cam(%.1f, %.1f)\n",
+            player.pos.x,
+            player.pos.y,
+            m_entities.size(),
+            m_camera.Position().x,
+            m_camera.Position().y
+        );
     }
 }
