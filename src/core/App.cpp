@@ -1,10 +1,12 @@
 #include "core/App.h"
 #include "game/Game.h"
+#include "engine/DebugUI.h"
 #include "platform/SdlPlatform.h"
-
+#include "engine/DebugState.h"
 #include <cstdio>
 
 static SdlPlatform g_platform;
+DebugState dbg;
 
 bool App::Init(const AppConfig& cfg) {
     if (!g_platform.Init(cfg.windowWidth, cfg.windowHeight, cfg.title)) {
@@ -19,10 +21,15 @@ void App::Run() {
     std::printf("[INFO] Entering main loop\n");
 
     Game game;
-    if (!game.Init(g_platform)) {
-        std::printf("[ERROR] Game init failed\n");
+    if (!game.Init(g_platform)) return;
+
+    DebugUI debugUI;
+    if (!debugUI.Init(g_platform)) {
+        std::printf("[ERROR] DebugUI init failed\n");
         return;
     }
+
+    g_platform.SetEventCallback(&DebugUI::OnSdlEvent, &debugUI);
 
     // Fixed timestep simulation parameters
     const float fixedDt = 1.0f / 60.0f;
@@ -31,10 +38,11 @@ void App::Run() {
     while (m_running) {
         // ---- Poll platform ----
         SdlFrameData frame{};
-        if (!g_platform.Pump(frame)) {
-            m_running = false;
+        if (!g_platform.Pump(frame))
             break;
-        }
+
+        dbg.dt = frame.dtSeconds;
+        dbg.fps = (frame.dtSeconds > 0.0f) ? (1.0f / frame.dtSeconds) : 0.0f;
 
         // Allow App-level quit via input
         if (frame.input.Down(Key::Escape)) {
@@ -49,7 +57,7 @@ void App::Run() {
         if (accumulator > 0.25f) accumulator = 0.25f;
 
         while (accumulator >= fixedDt) {
-            game.Update(g_platform, frame.input, fixedDt);
+            game.Update(g_platform, frame.input, fixedDt, dbg);
             accumulator -= fixedDt;
         }
 
@@ -57,9 +65,17 @@ void App::Run() {
 
         // ---- Render ----
         g_platform.BeginFrame();
-        game.Render(g_platform, alpha);
+
+        debugUI.BeginFrame();
+        debugUI.Draw(dbg);     // NEW
+        game.Render(g_platform, alpha, dbg); // we’ll pass dbg into Render
+        debugUI.EndFrame(g_platform);
+
+
         g_platform.EndFrame();
     }
+
+    debugUI.Shutdown();
 }
 
 void App::Shutdown() {

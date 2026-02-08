@@ -12,6 +12,7 @@ struct SpawnPoint {
 
 struct GameConfig {
     float playerSpeed = 220.0f;
+    float enemySpeed = 120.0f;
     float worldWidth = 2000.0f;
     float worldHeight = 2000.0f;
 

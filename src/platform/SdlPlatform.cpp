@@ -85,6 +85,9 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
             return false;
         }
+        if (m_eventCb) {
+            m_eventCb(m_eventUser, &e);
+        }
     }
 
     // ---- Input snapshot ----
@@ -163,4 +166,9 @@ void SdlPlatform::DrawDebugTestRect(float timeSeconds) {
     SDL_Rect r{ x, y, rectW, rectH };
     SDL_SetRenderDrawColor(m_renderer, 220, 220, 230, 255);
     SDL_RenderFillRect(m_renderer, &r);
+}
+
+void SdlPlatform::SetEventCallback(SdlEventCallback cb, void* userData) {
+    m_eventCb = cb;
+    m_eventUser = userData;
 }

@@ -67,9 +67,13 @@ bool LoadGameConfig(const char* path, GameConfig& outCfg) {
     );
 
     ExtractFloat(txt, "player_speed", outCfg.playerSpeed);
-    ExtractFloat(txt, "world_width",  outCfg.worldWidth);
+    ExtractFloat(txt, "enemy_speed", outCfg.enemySpeed);
+    ExtractFloat(txt, "world_width", outCfg.worldWidth);
     ExtractFloat(txt, "world_height", outCfg.worldHeight);
+
     ExtractVec2(txt, "player_spawn", outCfg.playerSpawn);
+    outCfg.enemySpawns.clear();
     ExtractEnemySpawns(txt, outCfg.enemySpawns);
+
     return true;
 }

@@ -5,9 +5,10 @@
 #include "engine/Input.h"
 #include "engine/Math.h"
 #include "game/Entity.h"
-
+#include "engine/DebugState.h"
+#include <filesystem>
 #include <vector>
-
+using EntityId = uint32_t;
 class SdlPlatform;
 
 /**
@@ -19,10 +20,8 @@ public:
     bool Init(SdlPlatform& platform);
 
     // Fixed-step simulation update.
-    void Update(SdlPlatform& platform, const Input& input, float fixedDt);
-
-    // Render using interpolation alpha [0..1] between fixed steps.
-    void Render(SdlPlatform& platform, float alpha);
+    void Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg);
+    void Render(SdlPlatform& platform, float alpha, const DebugState& dbg);
 
 private:
     void ClampPlayerToWorld(Entity& player) const;
@@ -43,4 +42,20 @@ private:
     float m_debugTimer = 0.0f;
 
     bool m_showDebug = true;
+
+    float m_shakeTime = 0.0f;
+    float m_shakeDuration = 0.0f;
+    float m_shakeStrength = 0.0f;
+
+    std::filesystem::file_time_type m_cfgTimestamp{};
+    float m_cfgPollTimer = 0.0f;
+
+    float m_enemySpeed = 120.0f;
+
+    bool ReloadConfig(const char* path);
+    void ApplyConfig(const GameConfig& cfg, bool respawnEnemies);
+    void RespawnEnemiesFromConfig();
+
+    EntityId m_nextEntityId = 1;
+    Entity& CreateEntity(EntityType type, Vec2 pos, float radius);
 };

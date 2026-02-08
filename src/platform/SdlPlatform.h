@@ -48,6 +48,10 @@ public:
     // Debug helper: proves render loop + vsync are working.
     void DrawDebugTestRect(float timeSeconds);
 
+    SDL_Window* WindowRaw() const { return m_window; }
+
+    using SdlEventCallback = void(*)(void* userData, const void* sdlEvent);
+    void SetEventCallback(SdlEventCallback cb, void* userData);
 private:
     SDL_Window*   m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
@@ -55,4 +59,7 @@ private:
     std::uint64_t m_perfFreq = 0;
     std::uint64_t m_prevCounter = 0;
     float         m_timeSeconds = 0.0f;
+
+    SdlEventCallback m_eventCb = nullptr;
+    void* m_eventUser = nullptr;
 };

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "engine/Math.h"
 
 enum class EntityType {
@@ -6,9 +7,17 @@ enum class EntityType {
     Enemy
 };
 
+using EntityId = uint32_t;   // <-- ADD THIS BEFORE struct Entity
+enum class AIState { Idle, Seek };
+
 struct Entity {
-    EntityType type;
-    Vec2 pos;
-    Vec2 prevPos;
-    float radius = 16.0f; // collision radius
+    EntityId id = 0;
+    EntityType type = EntityType::Enemy;
+    AIState ai = AIState::Idle;     // NEW
+
+    Vec2 pos{ 0,0 };
+    Vec2 prevPos{ 0,0 };
+    float radius = 16.0f;
+
+    float aggroRadius = 350.0f;     // NEW (world units)
 };
