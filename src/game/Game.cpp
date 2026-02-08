@@ -50,6 +50,8 @@ bool Game::Init(SdlPlatform& platform) {
     if (!m_assets.Init(platform))
         return false;
 
+    m_map.LoadCSV("assets/maps/level01.csv");
+
     // Load config (speeds, world size, spawns, enemies)
     ReloadConfig("assets/config.json");
 
@@ -194,6 +196,8 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     player.pos = player.pos + move * (m_playerSpeed * fixedDt);
     ClampPlayerToWorld(player);
 
+    m_map.ResolveCircleCollision(player.pos, player.radius);
+
     // --------------------
     // AI SYSTEM (Idle -> Seek)
     // --------------------
@@ -222,6 +226,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
             float invLen = 1.0f / std::sqrt(distSq);
             Vec2 dir = toPlayer * invLen;
             e.pos = e.pos + dir * (m_enemySpeed * fixedDt);
+            m_map.ResolveCircleCollision(e.pos, e.radius);
         }
     }
 
@@ -359,6 +364,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
     }
 
     const auto& playerTex = m_assets.Player();
+    m_map.Render(platform, m_camera);
 
     for (const Entity& e : m_entities) {
         const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;

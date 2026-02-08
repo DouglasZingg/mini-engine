@@ -27,7 +27,8 @@ add_executable(mini_engine
     third_party/imgui/imstb_rectpack.h
     third_party/imgui/imstb_textedit.h
     third_party/imgui/imstb_truetype.h
-
+    src/game/Tilemap.cpp
+    src/game/Tilemap.h
 )
 
 target_include_directories(mini_engine PRIVATE src)

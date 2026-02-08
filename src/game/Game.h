@@ -6,6 +6,7 @@
 #include "engine/Math.h"
 #include "game/Entity.h"
 #include "engine/DebugState.h"
+#include "game/Tilemap.h"
 #include <filesystem>
 #include <vector>
 using EntityId = uint32_t;
@@ -58,4 +59,6 @@ private:
 
     EntityId m_nextEntityId = 1;
     Entity& CreateEntity(EntityType type, Vec2 pos, float radius);
+
+    Tilemap m_map;
 };
