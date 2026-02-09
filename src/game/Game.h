@@ -28,6 +28,7 @@ private:
     void ClampPlayerToWorld(Entity& player) const;
     void UpdateCameraFollow(SdlPlatform& platform, const Entity& player);
     void DrawWorldGrid(SdlPlatform& platform) const;
+    void RestartGame();
 
 private:
     Assets     m_assets;
@@ -36,6 +37,11 @@ private:
 
     Vec2  m_worldSize{ 2000.0f, 2000.0f };
     float m_playerSpeed = 220.0f; // pixels/sec for now
+
+    // Combat tuning (driven by DebugState)
+    int   m_playerMaxHealth = 3;
+    float m_hitKnockback = 280.0f;
+    float m_invulnSeconds = 0.75f;
 
     std::vector<Entity> m_entities;
     int m_playerIndex = -1;
@@ -61,4 +67,6 @@ private:
     Entity& CreateEntity(EntityType type, Vec2 pos, float radius);
 
     Tilemap m_map;
+
+    bool m_gameOver = false;
 };

@@ -21,6 +21,10 @@ struct DebugState {
     int entityCount = 0;
     int enemyCount = 0;
 
+    // Combat HUD
+    int playerHealth = 3;
+    bool gameOver = false;
+
     // UI capture flags (set by DebugUI each frame)
     bool imguiWantsKeyboard = false;
     bool imguiWantsMouse = false;
@@ -43,4 +47,9 @@ struct DebugState {
     static constexpr int kMaxDebugEntities = 256;
     int debugEntityCount = 0;
     EntityDebugRow debugEntities[kMaxDebugEntities];
+
+    int playerMaxHealth = 3;
+    float hitKnockback = 280.0f;     // units/sec impulse
+    float invulnSeconds = 0.75f;
+
 };

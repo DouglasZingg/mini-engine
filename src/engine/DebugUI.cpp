@@ -89,6 +89,18 @@ void DebugUI::Draw(DebugState& dbg) {
     ImGui::Text("player: (%.1f, %.1f)", dbg.playerPos.x, dbg.playerPos.y);
     ImGui::Text("camera: (%.1f, %.1f)", dbg.cameraPos.x, dbg.cameraPos.y);
     ImGui::Text("entities: %d", dbg.entityCount);
+
+
+ImGui::Separator();
+ImGui::Text("Combat");
+ImGui::Text("Health: %d / %d", dbg.playerHealth, dbg.playerMaxHealth);
+if (dbg.gameOver) {
+    ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "GAME OVER (press R)");
+}
+ImGui::SliderInt("Max Health", &dbg.playerMaxHealth, 1, 10);
+ImGui::SliderFloat("Invuln (sec)", &dbg.invulnSeconds, 0.1f, 2.0f, "%.2f");
+ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
+
     ImGui::Separator();
 
     ImGui::Checkbox("Show Grid", &dbg.showGrid);

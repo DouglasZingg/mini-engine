@@ -125,6 +125,23 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player) {
 }
 
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
+    Entity& player = m_entities[m_playerIndex];
+
+    if (m_gameOver) {
+        // Press R to restart
+        static bool prevR = false;
+        bool rNow = input.Down(Key::R);
+        if (rNow && !prevR) {
+            RestartGame(); // implement below
+        }
+        prevR = rNow;
+
+        // Still update debug info and return
+        dbg.playerPos = player.pos;
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+
     // --------------------
     // HOT-RELOAD POLLING (runs even if paused)
     // --------------------
@@ -173,6 +190,30 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
         return;
     }
 
+    
+// --------------------
+// Combat tuning (from debug UI)
+// --------------------
+if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
+if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
+if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
+if (dbg.invulnSeconds > 3.0f) dbg.invulnSeconds = 3.0f;
+if (dbg.hitKnockback < 0.0f) dbg.hitKnockback = 0.0f;
+if (dbg.hitKnockback > 2000.0f) dbg.hitKnockback = 2000.0f;
+
+m_playerMaxHealth = dbg.playerMaxHealth;
+m_invulnSeconds   = dbg.invulnSeconds;
+m_hitKnockback    = dbg.hitKnockback;
+
+// Keep player state sane if tuning changed at runtime
+if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
+player.invulnDuration = m_invulnSeconds;
+
+if (player.invulnTimer > 0.0f) {
+        player.invulnTimer -= fixedDt;
+        if (player.invulnTimer < 0.0f) player.invulnTimer = 0.0f;
+    }
+
     // --------------------
     // Apply zoom from UI
     // --------------------
@@ -183,7 +224,6 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     // --------------------
     // INPUT SYSTEM (player)
     // --------------------
-    Entity& player = m_entities[m_playerIndex];
     player.prevPos = player.pos;
 
     Vec2 move{ 0, 0 };
@@ -253,30 +293,43 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
         Entity& e = m_entities[i];
         if (e.type != EntityType::Enemy) continue;
 
+        
         if (CheckCollision(player, e)) {
-            // Simple response: revert player
-            Vec2 d = player.pos - e.pos;
-            float distSq = d.x * d.x + d.y * d.y;
-            float r = player.radius + e.radius;
+                    // Separate both bodies to avoid "sticky" overlap.
+                    SeparateEntities(player, e);
 
-            if (distSq < r * r) {
-                float dist = std::sqrt(std::max(distSq, 0.0001f));
-                Vec2 n = d * (1.0f / dist);         // collision normal (away from enemy)
+                    // Compute a stable hit normal (from enemy -> player).
+                    Vec2 d = player.pos - e.pos;
+                    float distSq = d.x * d.x + d.y * d.y;
+                    float dist = std::sqrt(std::max(distSq, 0.0001f));
+                    Vec2 n = d * (1.0f / dist);
 
-                float penetration = r - dist;
-                player.pos = player.pos + n * penetration;  // push player out
+                    // DAMAGE (only if not invulnerable)
+                    if (player.invulnTimer <= 0.0f) {
+                        player.health -= 1;
+                        if (player.health < 0) player.health = 0;
 
-                // Optional: small extra separation so it doesn't re-trigger instantly
-                player.pos = player.pos + n * 0.5f;
+                        player.invulnTimer = m_invulnSeconds;
 
-                // Trigger shake once per frame of collision (fine for now)
-                m_shakeDuration = 0.15f;
-                m_shakeTime = m_shakeDuration;
-                m_shakeStrength = dbg.shakeStrength;
-            }
+                        // Knockback impulse (pos-based for now)
+                        player.pos = player.pos + n * (m_hitKnockback * fixedDt);
 
-            break;
-        }
+                        // Camera shake
+                        m_shakeDuration = 0.20f;
+                        m_shakeTime = m_shakeDuration;
+                        m_shakeStrength = dbg.shakeStrength;
+                    }
+
+                    // Keep player valid after collision pushes
+                    ClampPlayerToWorld(player);
+                    m_map.ResolveCircleCollision(player.pos, player.radius);
+                }
+
+
+    }
+
+    if (player.health <= 0) {
+        m_gameOver = true;
     }
 
     // --------------------
@@ -309,10 +362,11 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     // DEBUG OUTPUT (for UI)
     // --------------------
     dbg.entityCount = (int)m_entities.size();
+    dbg.enemyCount = std::max(0, dbg.entityCount - 1);
     dbg.playerPos = player.pos;
     dbg.cameraPos = m_camera.Position();
-    dbg.entityCount = (int)m_entities.size();
-    dbg.enemyCount = std::max(0, dbg.entityCount - 1);
+    dbg.playerHealth = player.health;
+    dbg.gameOver = m_gameOver;
     dbg.debugEntityCount = 0;
     for (const Entity& e : m_entities) {
         if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
@@ -359,11 +413,14 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
     if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
         return;
 
+    const Entity& player = m_entities[m_playerIndex];
+    const auto& playerTex = m_assets.Player();
+
     if (dbg.showGrid) {
         DrawWorldGrid(platform);
     }
 
-    const auto& playerTex = m_assets.Player();
+    // World (tilemap first, then entities)
     m_map.Render(platform, m_camera);
 
     for (const Entity& e : m_entities) {
@@ -371,6 +428,14 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
         const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
 
         if (e.type == EntityType::Player) {
+            // Blink while invulnerable
+            if (e.invulnTimer > 0.0f) {
+                const int phase = (int)(e.invulnTimer * 20.0f);
+                if ((phase & 1) == 0) {
+                    continue;
+                }
+            }
+
             const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
             const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
             platform.DrawSprite(playerTex, drawX, drawY);
@@ -382,8 +447,42 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
             platform.DrawFilledRect(drawX, drawY, size, size, 200, 80, 80);
         }
     }
-}
 
+    // --------------------
+    // HUD (screen-space)
+    // --------------------
+    const int maxH = std::max(1, dbg.playerMaxHealth);
+    const int curH = std::max(0, std::min(player.health, maxH));
+
+    int x = 16, y = 16;
+    for (int i = 0; i < curH; ++i) {
+        platform.DrawFilledRect(x + i * 22, y, 18, 18, 220, 60, 60);
+    }
+    for (int i = curH; i < maxH; ++i) {
+        platform.DrawFilledRect(x + i * 22, y, 18, 18, 60, 60, 60);
+    }
+
+    // --------------------
+    // Game Over overlay (no text renderer yet)
+    // --------------------
+    if (m_gameOver) {
+        int w = 0, h = 0;
+        platform.GetWindowSize(w, h);
+
+        // Dim background
+        platform.DrawFilledRect(0, 0, w, h, 20, 20, 20);
+
+        // Big red banner
+        const int bw = 520;
+        const int bh = 90;
+        platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 180, 40, 40);
+
+        // "Press R" hint bar
+        const int hw = 320;
+        const int hh = 22;
+        platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
+    }
+}
 bool Game::ReloadConfig(const char* path) {
     GameConfig newCfg = m_cfg;
     if (!LoadGameConfig(path, newCfg)) {
@@ -433,5 +532,20 @@ void Game::RespawnEnemiesFromConfig() {
     }
 }
 
+void Game::RestartGame() {
+    m_gameOver = false;
 
+    Entity& player = m_entities[m_playerIndex];
+    player.health = m_playerMaxHealth;
+    player.invulnTimer = 0.0f;
+    player.invulnDuration = m_invulnSeconds;
 
+    player.pos = m_cfg.playerSpawn;
+    player.prevPos = player.pos;
+
+    // Reset camera shake
+    m_shakeTime = 0.0f;
+    m_shakeDuration = 0.0f;
+
+    RespawnEnemiesFromConfig();
+}
