@@ -1,6 +1,7 @@
 #include "game/Tilemap.h"
 #include "platform/SdlPlatform.h"
-#include "engine/Camera2D.h" // or wherever your Camera2D lives
+#include "engine/Camera2D.h" 
+#include "game/Pathfinding.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -104,4 +105,21 @@ void Tilemap::Render(SdlPlatform& platform, const Camera2D& cam) const {
             platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 60, 60, 60);
         }
     }
+}
+
+bool Tilemap::IsSolidTile(int tx, int ty) const {
+    return At(tx, ty) == 1; // 1 = wall
+}
+
+TileCoord Tilemap::WorldToTile(const Vec2& world) const {
+    int tx = (int)std::floor(world.x / (float)m_tileSize);
+    int ty = (int)std::floor(world.y / (float)m_tileSize);
+    return TileCoord{ tx, ty };
+}
+
+Vec2 Tilemap::TileToWorldCenter(int tx, int ty) const {
+    return Vec2{
+        tx * (float)m_tileSize + m_tileSize * 0.5f,
+        ty * (float)m_tileSize + m_tileSize * 0.5f
+    };
 }

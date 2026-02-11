@@ -52,4 +52,5 @@ struct DebugState {
     float hitKnockback = 280.0f;     // units/sec impulse
     float invulnSeconds = 0.75f;
 
+    bool showPaths = true;
 };

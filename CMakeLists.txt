@@ -29,6 +29,8 @@ add_executable(mini_engine
     third_party/imgui/imstb_truetype.h
     src/game/Tilemap.cpp
     src/game/Tilemap.h
+    src/game/Pathfinding.cpp
+    src/game/Pathfinding.h
 )
 
 target_include_directories(mini_engine PRIVATE src)

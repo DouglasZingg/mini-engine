@@ -4,6 +4,7 @@
 #include "engine/Math.h"
 
 class SdlPlatform;
+struct TileCoord;
 
 class Tilemap {
 public:
@@ -21,6 +22,10 @@ public:
 
     // Collision helper for circle-like entities
     void ResolveCircleCollision(Vec2& pos, float radius) const;
+
+    bool IsSolidTile(int tx, int ty) const;        // tile coords
+    TileCoord WorldToTile(const Vec2& world) const;
+    Vec2 TileToWorldCenter(int tx, int ty) const;
 
 private:
     int m_w = 0;
