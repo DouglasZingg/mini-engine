@@ -17,15 +17,23 @@ static bool CheckCollision(const Entity& a, const Entity& b) {
 	return distSq <= r * r;
 }
 
-static void SeparateEntities(Entity& a, Entity& b) {
+static void SeparateEntities(Entity& a, Entity& b)
+{
 	Vec2 d = a.pos - b.pos;
 	float distSq = d.x * d.x + d.y * d.y;
-	float r = a.radius + b.radius;
-	if (distSq >= r * r) return;
+	float minDist = a.radius + b.radius;
 
-	float dist = std::sqrt(std::max(distSq, 0.0001f));
+	if (distSq <= 0.0001f) {
+		a.pos.x += 0.5f;
+		b.pos.x -= 0.5f;
+		return;
+	}
+
+	float dist = std::sqrt(distSq);
+	if (dist >= minDist) return;
+
 	Vec2 n = d * (1.0f / dist);
-	float penetration = r - dist;
+	float penetration = (minDist - dist);
 
 	a.pos = a.pos + n * (penetration * 0.5f);
 	b.pos = b.pos - n * (penetration * 0.5f);
@@ -65,22 +73,18 @@ bool Game::Init(SdlPlatform& platform) {
 
 	RestartGame();
 
+	m_state = GameState::Title;
+	m_gameOver = false;
+	m_gameWin = false;
+
 	// Camera init (center on player)
 	int winW = 0, winH = 0;
 	platform.GetWindowSize(winW, winH);
-	m_camera.SetZoom(1.0f);
-	m_camera.SetShakeOffset({ 0.0f, 0.0f });
 
+	Vec2 halfScreen{ winW * 0.5f, winH * 0.5f };
 	const Entity& player = m_entities[m_playerIndex];
-	m_camera.SetPosition(player.pos - Vec2{ (winW * 0.5f), (winH * 0.5f) });
+	m_camera.SetPosition(player.pos - halfScreen);
 
-	// Hot-reload timestamp init
-	try {
-		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
-	}
-	catch (...) {}
-
-	m_cfgPollTimer = 0.0f;
 	return true;
 }
 
@@ -126,16 +130,36 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player) {
 	m_camera.SetPosition(cam);
 }
 
-void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
+void Game::Update(SdlPlatform& platform, const SdlFrameData& frame, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
 
-	if (m_gameOver || m_gameWin) {
-		static bool prevR = false;
-		bool rNow = input.Down(Key::R);
-		if (rNow && !prevR) {
-			RestartGame();
+	// --------------------
+	// GAME FLOW STATE MACHINE (Title / Playing / Win / Lose)
+	// --------------------
+	static bool prevR = false;
+	bool rNow = input.Down(Key::R);
+	bool rPressed = (rNow && !prevR);
+	prevR = rNow;
+
+	// Keep legacy flags in sync (some render paths use them)
+	if (m_state == GameState::Win) { m_gameWin = true;  m_gameOver = false; }
+	if (m_state == GameState::Lose) { m_gameOver = true; m_gameWin = false; }
+	if (m_state == GameState::Title) {
+		if (m_state == GameState::Title) {
+			if (platformFrame.startPressed) {   // <- however you access your SdlFrameData
+				RestartGame();
+				m_state = GameState::Playing;
+			}
+			return;
 		}
-		prevR = rNow;
+	}
+
+
+	if (m_state == GameState::Win || m_state == GameState::Lose) {
+		if (rPressed) {
+			RestartGame();
+			m_state = GameState::Playing;
+		}
 
 		dbg.playerPos = player.pos;
 		dbg.cameraPos = m_camera.Position();
@@ -396,17 +420,17 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 			}
 
 			if (m_pickupsRemaining <= 0) {
-				m_gameWin = true;
+				m_gameWin = true;                
+				m_state = GameState::Win;      
 			}
 		}
 	}
 
-	//if (m_pickupsRemaining <= 0) {
-	//	m_gameWin = true;
-	//}
 	if (player.health <= 0) {
-		m_gameOver = true;
+		m_gameOver = true;               // keep legacy flag
+		m_state = GameState::Lose;       // Day 11: authoritative state
 	}
+
 
 	// --------------------
 	// CAMERA SYSTEM (follow + clamp)
@@ -567,35 +591,46 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
 	}
 
+	//--------------------
+		// Title overlay
+		// --------------------
+	if (m_state == GameState::Title) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+		platform.DrawFilledRect(0, 0, w, h, 15, 15, 15);
+		// Simple banner + "Press R" hint (no text renderer yet)
+		platform.DrawFilledRect(w / 2 - 260, h / 2 - 70, 520, 90, 40, 40, 40);
+		platform.DrawFilledRect(w / 2 - 160, h / 2 + 30, 320, 22, 80, 80, 80);
+	}
+
 	// --------------------
 	// Game Over overlay (no text renderer yet)
 	// --------------------
-	if (m_gameOver) {
+	if (m_gameOver || m_state == GameState::Lose) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
 
-		// Dim background
 		platform.DrawFilledRect(0, 0, w, h, 20, 20, 20);
 
-		// Big red banner
 		const int bw = 520;
 		const int bh = 90;
 		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 180, 40, 40);
 
-		// "Press R" hint bar
 		const int hw = 320;
 		const int hh = 22;
 		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
 	}
-	if (m_gameWin) {
+
+	if (m_gameWin || m_state == GameState::Win) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
 
-		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha
+		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60);
 		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
 	}
 
 }
+
 bool Game::ReloadConfig(const char* path) {
 	GameConfig newCfg = m_cfg;
 	if (!LoadGameConfig(path, newCfg)) {
@@ -647,6 +682,8 @@ void Game::RespawnEnemiesFromConfig() {
 
 void Game::RestartGame() {
 	m_gameOver = false;
+	m_gameWin = false;
+	m_state = GameState::Playing;
 
 	Entity& player = m_entities[m_playerIndex];
 	player.health = m_playerMaxHealth;
@@ -676,7 +713,6 @@ void Game::RestartGame() {
 		}
 	}
 }
-
 void Game::SpawnPickupAt(const Vec2& worldPos)
 {
 	Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);

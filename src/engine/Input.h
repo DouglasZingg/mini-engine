@@ -2,11 +2,17 @@
 #include <cstdint>
 
 enum class Key : uint8_t {
-    W, A, S, D,
+    W = 0,
+    A,
+    S,
+    D,
     Escape,
-    Count,
     Tab,
-    R
+    R,
+    Return,
+    Space,
+
+    Count 
 };
 
 struct InputState {
