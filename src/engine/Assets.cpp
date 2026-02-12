@@ -1,11 +1,15 @@
 #include "engine/Assets.h"
-#include "platform/SdlPlatform.h"
+#include <SDL.h>
+#include <string>
+#include "engine/Paths.h"
 
-bool Assets::Init(SdlPlatform& platform) {
-    // Keep paths simple for now; we assume the working directory is repo root.
-    return m_player.LoadBMP(platform, "assets/player.bmp");
+bool Assets::Init(SdlPlatform& platform)
+{
+    return m_player.LoadBMP(platform, AssetPath("assets/player.bmp").c_str());
 }
 
-void Assets::Shutdown() {
+
+void Assets::Shutdown()
+{
     m_player.Destroy();
 }

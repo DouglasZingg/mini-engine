@@ -13,7 +13,6 @@ public:
     void Shutdown();
 
     const SdlTexture& Player() const { return m_player; }
-
 private:
     SdlTexture m_player;
 };

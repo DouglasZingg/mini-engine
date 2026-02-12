@@ -123,3 +123,8 @@ Vec2 Tilemap::TileToWorldCenter(int tx, int ty) const {
         ty * (float)m_tileSize + m_tileSize * 0.5f
     };
 }
+
+void Tilemap::SetAt(int x, int y, int v) {
+    if (x < 0 || y < 0 || x >= m_w || y >= m_h) return;
+    m_tiles[y * m_w + x] = v;
+}

@@ -69,4 +69,14 @@ private:
     Tilemap m_map;
 
     bool m_gameOver = false;
+    int  m_score = 0;
+    int  m_pickupsRemaining = 0;
+    bool m_gameWin = false;
+
+    void SpawnPickupAt(const Vec2& worldPos);
+
+    int m_tokensCollected = 0;
+    int m_tokensTotal = 0;
+
+
 };

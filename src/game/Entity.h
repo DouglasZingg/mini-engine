@@ -3,10 +3,7 @@
 #include "engine/Math.h"
 #include <vector>
 
-enum class EntityType {
-    Player,
-    Enemy
-};
+enum class EntityType { Player, Enemy, Pickup };
 
 using EntityId = uint32_t;  
 enum class AIState { Idle, Seek };
@@ -37,4 +34,7 @@ struct Entity {
     Vec2 velocity{ 0,0 };            // for knockback / movement smoothing (optional)
 
     PathState path;
+
+    bool active = true;
+    int value = 1;      // for pickups
 };

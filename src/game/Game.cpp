@@ -5,7 +5,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <algorithm>
-
+#include <engine/Assets.h>
+#include "engine/Paths.h"
 // -----------------------------
 // Collision (circle vs circle)
 // -----------------------------
@@ -54,15 +55,15 @@ bool Game::Init(SdlPlatform& platform) {
 	m_map.LoadCSV("assets/maps/level01.csv");
 
 	// Load config (speeds, world size, spawns, enemies)
-	ReloadConfig("assets/config.json");
+	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
+
 
 	// Create player (use config spawn ONCE on init)
 	m_entities.clear();
 	m_playerIndex = 0;
 	CreateEntity(EntityType::Player, m_cfg.playerSpawn, 20.0f);
 
-	// Spawn enemies from config
-	RespawnEnemiesFromConfig();
+	RestartGame();
 
 	// Camera init (center on player)
 	int winW = 0, winH = 0;
@@ -128,16 +129,14 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player) {
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
 
-	if (m_gameOver) {
-		// Press R to restart
+	if (m_gameOver || m_gameWin) {
 		static bool prevR = false;
 		bool rNow = input.Down(Key::R);
 		if (rNow && !prevR) {
-			RestartGame(); // implement below
+			RestartGame();
 		}
 		prevR = rNow;
 
-		// Still update debug info and return
 		dbg.playerPos = player.pos;
 		dbg.cameraPos = m_camera.Position();
 		return;
@@ -381,6 +380,30 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 	}
 
+	// --------------------
+	// PICKUPS (player vs pickups)
+	// --------------------
+	for (Entity& e : m_entities) {
+		if (!e.active) continue;
+		if (e.type != EntityType::Pickup) continue;
+
+		if (CheckCollision(player, e)) {
+			e.active = false;
+			m_score += e.value;
+
+			if (m_pickupsRemaining > 0) {
+				m_pickupsRemaining--;
+			}
+
+			if (m_pickupsRemaining <= 0) {
+				m_gameWin = true;
+			}
+		}
+	}
+
+	//if (m_pickupsRemaining <= 0) {
+	//	m_gameWin = true;
+	//}
 	if (player.health <= 0) {
 		m_gameOver = true;
 	}
@@ -426,7 +449,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		auto& row = dbg.debugEntities[dbg.debugEntityCount++];
 
 		row.id = e.id;
-		row.type = (e.type == EntityType::Player) ? 0 : 1;
+		if (e.type == EntityType::Player) row.type = 0;
+		else if (e.type == EntityType::Enemy) row.type = 1;
+		else if (e.type == EntityType::Pickup) row.type = 2;
+		else row.type = 3;
 		row.x = e.pos.x;
 		row.y = e.pos.y;
 		row.radius = e.radius;
@@ -477,6 +503,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	m_map.Render(platform, m_camera);
 
 	for (const Entity& e : m_entities) {
+		if (!e.active) continue;
 		const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
 		const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
 
@@ -492,6 +519,10 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 			const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
 			const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
 			platform.DrawSprite(playerTex, drawX, drawY);
+		}
+		else if (e.type == EntityType::Pickup) {
+			Vec2 screen = m_camera.WorldToScreen(e.pos);
+			platform.DrawFilledRect((int)screen.x - 4, (int)screen.y - 4, 8, 8, 60, 60, 60);
 		}
 		else {
 			if (dbg.showPaths && e.type == EntityType::Enemy) {
@@ -509,6 +540,8 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		}
 	}
 
+
+
 	// --------------------
 	// HUD (screen-space)
 	// --------------------
@@ -521,6 +554,17 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	}
 	for (int i = curH; i < maxH; ++i) {
 		platform.DrawFilledRect(x + i * 22, y, 18, 18, 60, 60, 60);
+	}
+
+	// Score pips (top-left)
+// Tokens row (below hearts) using m_score
+	const int tokenSize = 18;     // same as hearts
+	const int tokenStep = 22;     // same spacing as hearts
+	const int tokenX = 16;
+	const int tokenY = 16 + tokenStep; // one row below hearts
+
+	for (int i = 0; i < m_score; ++i) {
+		platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
 	}
 
 	// --------------------
@@ -543,6 +587,14 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		const int hh = 22;
 		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
 	}
+	if (m_gameWin) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+
+		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha
+		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
+	}
+
 }
 bool Game::ReloadConfig(const char* path) {
 	GameConfig newCfg = m_cfg;
@@ -609,4 +661,28 @@ void Game::RestartGame() {
 	m_shakeDuration = 0.0f;
 
 	RespawnEnemiesFromConfig();
+
+	m_score = 0;
+	m_pickupsRemaining = 0;
+	m_gameWin = false;
+
+	// Create pickups from tile id 2
+	for (int ty = 0; ty < m_map.Height(); ++ty) {
+		for (int tx = 0; tx < m_map.Width(); ++tx) {
+			if (m_map.At(tx, ty) == 2) {
+				Vec2 center = m_map.TileToWorldCenter(tx, ty);
+				SpawnPickupAt(center);
+			}
+		}
+	}
 }
+
+void Game::SpawnPickupAt(const Vec2& worldPos)
+{
+	Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);
+	p.value = 1;
+	p.active = true;
+
+	m_pickupsRemaining++;
+}
+

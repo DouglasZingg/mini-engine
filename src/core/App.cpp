@@ -21,7 +21,12 @@ void App::Run() {
     std::printf("[INFO] Entering main loop\n");
 
     Game game;
-    if (!game.Init(g_platform)) return;
+    if (!game.Init(g_platform)) {
+        std::printf("[ERROR] Game::Init failed. Check assets path (assets/player.bmp) and config.\n");
+        m_running = false;
+        return;
+    }
+
 
     DebugUI debugUI;
     if (!debugUI.Init(g_platform)) {

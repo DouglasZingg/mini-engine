@@ -31,7 +31,10 @@ add_executable(mini_engine
     src/game/Tilemap.h
     src/game/Pathfinding.cpp
     src/game/Pathfinding.h
+    src/engine/Paths.cpp
 )
+
+list(REMOVE_DUPLICATES SOURCES)
 
 target_include_directories(mini_engine PRIVATE src)
 

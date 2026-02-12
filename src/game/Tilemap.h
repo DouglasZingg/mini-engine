@@ -27,6 +27,8 @@ public:
     TileCoord WorldToTile(const Vec2& world) const;
     Vec2 TileToWorldCenter(int tx, int ty) const;
 
+    void SetAt(int x, int y, int v);
+
 private:
     int m_w = 0;
     int m_h = 0;
