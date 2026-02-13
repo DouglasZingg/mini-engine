@@ -4,7 +4,7 @@
 struct AppConfig {
     int windowWidth = 1280;
     int windowHeight = 720;
-    const char* title = "Mini Engine - Day 1";
+    const char* title = "Mini Engine";
 };
 
 class App {

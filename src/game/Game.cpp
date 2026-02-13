@@ -96,35 +96,41 @@ void Game::ClampPlayerToWorld(Entity& player) const {
 	if (player.pos.y > m_worldSize.y - halfH) player.pos.y = m_worldSize.y - halfH;
 }
 
-void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player) {
+void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
+{
 	int winW = 0, winH = 0;
 	platform.GetWindowSize(winW, winH);
 
-	const float zoom = m_camera.Zoom();
-	const Vec2 halfScreenPx{ winW * 0.5f, winH * 0.5f };
-	const Vec2 halfScreenWorld = halfScreenPx * (1.0f / zoom);
+	// World size in pixels (or world units that match your render units)
+	const float worldW = m_map.Width() * (float)m_map.TileSize();
+	const float worldH = m_map.Height() * (float)m_map.TileSize();
 
-	// Center camera on player in world space
-	m_camera.SetPosition(player.pos - halfScreenWorld);
+	// Desired camera position: center player
+	Vec2 camPos = player.pos - Vec2{ winW * 0.5f, winH * 0.5f };
 
-	// Clamp camera so we never show outside the world.
-	Vec2 cam = m_camera.Position();
-	const float viewW = (float)winW * (1.0f / zoom);
-	const float viewH = (float)winH * (1.0f / zoom);
+	// Compute max scroll range (never negative)
+	const float maxX = std::max(0.0f, worldW - (float)winW);
+	const float maxY = std::max(0.0f, worldH - (float)winH);
 
-	float maxCamX = m_worldSize.x - viewW;
-	float maxCamY = m_worldSize.y - viewH;
+	if (maxX <= 0.0f) {
+		// World narrower than screen -> center world horizontally
+		camPos.x = (worldW - (float)winW) * 0.5f; // negative is OK here; it centers
+	}
+	else {
+		camPos.x = std::clamp(camPos.x, 0.0f, maxX);
+	}
 
-	if (maxCamX < 0.0f) maxCamX = 0.0f;
-	if (maxCamY < 0.0f) maxCamY = 0.0f;
+	if (maxY <= 0.0f) {
+		// World shorter than screen -> center world vertically
+		camPos.y = (worldH - (float)winH) * 0.5f;
+	}
+	else {
+		camPos.y = std::clamp(camPos.y, 0.0f, maxY);
+	}
 
-	if (cam.x < 0.0f) cam.x = 0.0f;
-	if (cam.y < 0.0f) cam.y = 0.0f;
-	if (cam.x > maxCamX) cam.x = maxCamX;
-	if (cam.y > maxCamY) cam.y = maxCamY;
-
-	m_camera.SetPosition(cam);
+	m_camera.SetPosition(camPos);
 }
+
 
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
@@ -522,7 +528,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		}
 		else if (e.type == EntityType::Pickup) {
 			Vec2 screen = m_camera.WorldToScreen(e.pos);
-			platform.DrawFilledRect((int)screen.x - 4, (int)screen.y - 4, 8, 8, 60, 60, 60);
+			platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8 , 16, 16, 255, 255, 0);
 		}
 		else {
 			if (dbg.showPaths && e.type == EntityType::Enemy) {
