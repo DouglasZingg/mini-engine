@@ -70,7 +70,6 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
 
     // Clamp dt to avoid extreme simulation steps after a debugger pause.
     dt = std::clamp(dt, 0.0f, 0.1f);
-    outFrame.startPressed = false;
 
     m_timeSeconds += dt;
 
@@ -80,23 +79,19 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     // ---- Events ----
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_QUIT) return false;
-
+        if (e.type == SDL_QUIT) {
+            return false;
+        }
+        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+            return false;
+        }
         if (m_eventCb) {
             m_eventCb(m_eventUser, &e);
         }
-
-        if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
-            if (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_SPACE) {
-                outFrame.startPressed = true; 
-            }
-        }
     }
-
 
     // ---- Input snapshot ----
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-
     outFrame.input.SetKey(Key::W, keys[SDL_SCANCODE_W] != 0);
     outFrame.input.SetKey(Key::A, keys[SDL_SCANCODE_A] != 0);
     outFrame.input.SetKey(Key::S, keys[SDL_SCANCODE_S] != 0);
@@ -104,9 +99,6 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     outFrame.input.SetKey(Key::Escape, keys[SDL_SCANCODE_ESCAPE] != 0);
     outFrame.input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
     outFrame.input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
-    outFrame.input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
-    outFrame.input.SetKey(Key::Space, keys[SDL_SCANCODE_SPACE] != 0);
-
 
 
     // Occasional logging for sanity (once per second).

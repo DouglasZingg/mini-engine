@@ -12,14 +12,6 @@
 using EntityId = uint32_t;
 class SdlPlatform;
 
-// Simple game flow state machine (Day 11)
-enum class GameState {
-    Title,
-    Playing,
-    Win,
-    Lose
-};
-
 /**
  * Game layer (rules + world state).
  * Owns entities and drives simulation/rendering using platform services.
@@ -29,7 +21,7 @@ public:
     bool Init(SdlPlatform& platform);
 
     // Fixed-step simulation update.
-    void Update(SdlPlatform& platform, const SdlFrameData& frame, float fixedDt, DebugState& dbg);
+    void Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg);
     void Render(SdlPlatform& platform, float alpha, const DebugState& dbg);
 
 private:
@@ -81,10 +73,10 @@ private:
     int  m_pickupsRemaining = 0;
     bool m_gameWin = false;
 
-    GameState m_state = GameState::Title;
-
     void SpawnPickupAt(const Vec2& worldPos);
 
     int m_tokensCollected = 0;
     int m_tokensTotal = 0;
+
+
 };
