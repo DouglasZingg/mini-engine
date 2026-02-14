@@ -54,33 +54,29 @@ bool Game::Init(SdlPlatform& platform) {
 
 	m_map.LoadCSV("assets/maps/level01.csv");
 
-	// Load config (speeds, world size, spawns, enemies)
+	// Load config (speeds, world size, etc.)
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
 
-
-	// Create player (use config spawn ONCE on init)
-	m_entities.clear();
-	m_playerIndex = 0;
-	CreateEntity(EntityType::Player, m_cfg.playerSpawn, 20.0f);
-
-	RestartGame();
-
-	// Camera init (center on player)
-	int winW = 0, winH = 0;
-	platform.GetWindowSize(winW, winH);
+	// Camera defaults
 	m_camera.SetZoom(1.0f);
 	m_camera.SetShakeOffset({ 0.0f, 0.0f });
-
-	const Entity& player = m_entities[m_playerIndex];
-	m_camera.SetPosition(player.pos - Vec2{ (winW * 0.5f), (winH * 0.5f) });
 
 	// Hot-reload timestamp init
 	try {
 		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
 	}
 	catch (...) {}
-
 	m_cfgPollTimer = 0.0f;
+
+	// Build entities (player/enemies/pickups) from the CSV markers
+	RestartGame();
+
+	// Center camera on player after spawn
+	int winW = 0, winH = 0;
+	platform.GetWindowSize(winW, winH);
+	const Entity& player = m_entities[m_playerIndex];
+	m_camera.SetPosition(player.pos - Vec2{ (winW * 0.5f), (winH * 0.5f) });
+
 	return true;
 }
 
@@ -653,34 +649,70 @@ void Game::RespawnEnemiesFromConfig() {
 
 void Game::RestartGame() {
 	m_gameOver = false;
+	m_gameWin = false;
 
-	Entity& player = m_entities[m_playerIndex];
-	player.health = m_playerMaxHealth;
-	player.invulnTimer = 0.0f;
-	player.invulnDuration = m_invulnSeconds;
-
-	player.pos = m_cfg.playerSpawn;
-	player.prevPos = player.pos;
+	// Reset runtime counters/state
+	m_score = 0;
+	m_pickupsRemaining = 0;
+	m_tokensCollected = 0;
+	m_tokensTotal = 0;
 
 	// Reset camera shake
 	m_shakeTime = 0.0f;
 	m_shakeDuration = 0.0f;
 
-	RespawnEnemiesFromConfig();
+	// Rebuild ALL entities from the CSV markers each restart.
+	m_entities.clear();
+	m_playerIndex = 0;
+	m_nextEntityId = 1;
 
-	m_score = 0;
-	m_pickupsRemaining = 0;
-	m_gameWin = false;
+	constexpr int kTilePickup = 2;
+	constexpr int kTileEnemy  = 3;
+	constexpr int kTilePlayer = 4;
 
-	// Create pickups from tile id 2
+	// 1) Find player spawn from map (tile 4). Fallback to config if none.
+	Vec2 playerSpawn = m_cfg.playerSpawn;
+	bool foundPlayer = false;
+	for (int ty = 0; ty < m_map.Height() && !foundPlayer; ++ty) {
+		for (int tx = 0; tx < m_map.Width(); ++tx) {
+			if (m_map.At(tx, ty) == kTilePlayer) {
+				playerSpawn = m_map.TileToWorldCenter(tx, ty);
+				foundPlayer = true;
+				break;
+			}
+		}
+	}
+
+	// Create player
+	CreateEntity(EntityType::Player, playerSpawn, 20.0f);
+	Entity& player = m_entities[m_playerIndex];
+	player.health = m_playerMaxHealth;
+	player.invulnTimer = 0.0f;
+	player.invulnDuration = m_invulnSeconds;
+	player.pos = playerSpawn;
+	player.prevPos = player.pos;
+
+	// 2) Spawn enemies from map (tile 3)
 	for (int ty = 0; ty < m_map.Height(); ++ty) {
 		for (int tx = 0; tx < m_map.Width(); ++tx) {
-			if (m_map.At(tx, ty) == 2) {
+			if (m_map.At(tx, ty) == kTileEnemy) {
+				Vec2 center = m_map.TileToWorldCenter(tx, ty);
+				CreateEntity(EntityType::Enemy, center, 16.0f);
+			}
+		}
+	}
+
+	// 3) Spawn pickups from map (tile 2)
+	for (int ty = 0; ty < m_map.Height(); ++ty) {
+		for (int tx = 0; tx < m_map.Width(); ++tx) {
+			if (m_map.At(tx, ty) == kTilePickup) {
 				Vec2 center = m_map.TileToWorldCenter(tx, ty);
 				SpawnPickupAt(center);
 			}
 		}
 	}
+
+	m_tokensTotal = m_pickupsRemaining;
 }
 
 void Game::SpawnPickupAt(const Vec2& worldPos)
