@@ -131,7 +131,12 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
 
-	if (m_gameOver || m_gameWin) {
+	if (input.Down(Key::Escape)) {
+		m_requestQuit = true;
+		return; 
+	}
+
+	if (m_gameOver) {
 		static bool prevR = false;
 		bool rNow = input.Down(Key::R);
 		if (rNow && !prevR) {
@@ -143,6 +148,45 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		dbg.cameraPos = m_camera.Position();
 		return;
 	}
+
+	if (m_gameWin) {
+		// Advance to the next level only on an edge-triggered Enter/Return press.
+		static bool prevReturn = false;
+		const bool returnNow = input.Down(Key::Return);
+		const bool returnPressed = (returnNow && !prevReturn);
+		prevReturn = returnNow;
+
+		if (returnPressed) {
+			const int kMaxLevel = 10;
+			const int nextLevel = (m_currentLevel < kMaxLevel) ? (m_currentLevel + 1) : 1;
+
+			// assets/maps/level01.csv ... level10.csv
+			char levelPath[64]{};
+			std::snprintf(levelPath, sizeof(levelPath), "assets/maps/level%02d.csv", nextLevel);
+
+			// Only commit if load succeeds
+			if (m_map.LoadCSV(levelPath)) {
+				m_currentLevel = nextLevel;
+
+				// RestartGame() should rebuild entities/pickups based on the NEW map
+				RestartGame();
+
+				// Re-center camera immediately (we early-return during Win state)
+				int winW = 0, winH = 0;
+				platform.GetWindowSize(winW, winH);
+				Vec2 halfScreen{ winW * 0.5f, winH * 0.5f };
+				m_camera.SetPosition(m_entities[m_playerIndex].pos - halfScreen);
+			}
+			else {
+				std::printf("[LEVEL] Failed to load %s (staying on level %d)\n", levelPath, m_currentLevel);
+			}
+		}
+
+		dbg.playerPos = player.pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
+
 
 	// --------------------
 	// HOT-RELOAD POLLING (runs even if paused)
@@ -403,9 +447,6 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		}
 	}
 
-	//if (m_pickupsRemaining <= 0) {
-	//	m_gameWin = true;
-	//}
 	if (player.health <= 0) {
 		m_gameOver = true;
 	}
@@ -492,6 +533,9 @@ void Game::DrawWorldGrid(SdlPlatform& platform) const {
 
 void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
+		return;
+
+	if (m_requestQuit)
 		return;
 
 	const Entity& player = m_entities[m_playerIndex];

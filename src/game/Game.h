@@ -23,6 +23,8 @@ public:
     // Fixed-step simulation update.
     void Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg);
     void Render(SdlPlatform& platform, float alpha, const DebugState& dbg);
+    
+    bool RequestedQuit() const { return m_requestQuit; }
 
 private:
     void ClampPlayerToWorld(Entity& player) const;
@@ -78,5 +80,9 @@ private:
     int m_tokensCollected = 0;
     int m_tokensTotal = 0;
 
+    int m_currentLevel = 1;
+
+    bool m_requestQuit = false;
+    
 
 };

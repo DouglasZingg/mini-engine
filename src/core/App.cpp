@@ -49,12 +49,6 @@ void App::Run() {
         dbg.dt = frame.dtSeconds;
         dbg.fps = (frame.dtSeconds > 0.0f) ? (1.0f / frame.dtSeconds) : 0.0f;
 
-        // Allow App-level quit via input
-        if (frame.input.Down(Key::Escape)) {
-            m_running = false;
-            break;
-        }
-
         // ---- Fixed timestep update ----
         accumulator += frame.dtSeconds;
 
@@ -65,6 +59,9 @@ void App::Run() {
             game.Update(g_platform, frame.input, fixedDt, dbg);
             accumulator -= fixedDt;
         }
+
+        if (game.RequestedQuit())
+            break;
 
         const float alpha = (fixedDt > 0.0f) ? (accumulator / fixedDt) : 0.0f;
 

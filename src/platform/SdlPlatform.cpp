@@ -99,6 +99,7 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     outFrame.input.SetKey(Key::Escape, keys[SDL_SCANCODE_ESCAPE] != 0);
     outFrame.input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
     outFrame.input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
+    outFrame.input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
 
 
     // Occasional logging for sanity (once per second).
