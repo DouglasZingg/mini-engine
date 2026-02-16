@@ -84,5 +84,7 @@ private:
 
     bool m_requestQuit = false;
     
+    enum class FlowState { Playing, Win, Lose };
+    FlowState m_flowState = FlowState::Playing;
 
 };

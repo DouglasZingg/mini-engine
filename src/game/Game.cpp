@@ -131,62 +131,66 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
 
+	// --------------------
+// AUTHORITATIVE FLOW INPUT (edge-triggered)
+// --------------------
+	static bool prevReturn = false;
+	static bool prevR = false;
+
+	const bool returnNow = input.Down(Key::Return);
+	const bool rNow = input.Down(Key::R);
+
+	const bool returnPressed = (returnNow && !prevReturn);
+	const bool rPressed = (rNow && !prevR);
+
+	prevReturn = returnNow;
+	prevR = rNow;
+
+	// Keep legacy flags in sync for any old render paths
+	m_gameWin = (m_flowState == FlowState::Win);
+	m_gameOver = (m_flowState == FlowState::Lose);
+
+	// --------------------
+	// FLOW STATE HANDLING
+	// --------------------
+	if (m_flowState == FlowState::Win) {
+		// Advance ONLY on key press (NOT every frame)
+		if (returnPressed) {
+			// Next level (wrap or clamp)
+			m_currentLevel++;
+			if (m_currentLevel > 10) m_currentLevel = 1;
+
+			char mapPath[64];
+			std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
+			m_map.LoadCSV(mapPath);
+
+			RestartGame();                 // rebuilds entities from CSV markers
+			m_flowState = FlowState::Playing;
+		}
+
+		// Update debug info and stop simulation while in win screen
+		dbg.playerPos = player.pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
+
+	if (m_flowState == FlowState::Lose) {
+		// Restart ONLY on key press
+		if (rPressed) {
+			RestartGame();
+			m_flowState = FlowState::Playing;
+		}
+
+		dbg.playerPos = player.pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
+
+
 	if (input.Down(Key::Escape)) {
 		m_requestQuit = true;
 		return; 
 	}
-
-	if (m_gameOver) {
-		static bool prevR = false;
-		bool rNow = input.Down(Key::R);
-		if (rNow && !prevR) {
-			RestartGame();
-		}
-		prevR = rNow;
-
-		dbg.playerPos = player.pos;
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
-
-	if (m_gameWin) {
-		// Advance to the next level only on an edge-triggered Enter/Return press.
-		static bool prevReturn = false;
-		const bool returnNow = input.Down(Key::Return);
-		const bool returnPressed = (returnNow && !prevReturn);
-		prevReturn = returnNow;
-
-		if (returnPressed) {
-			const int kMaxLevel = 10;
-			const int nextLevel = (m_currentLevel < kMaxLevel) ? (m_currentLevel + 1) : 1;
-
-			// assets/maps/level01.csv ... level10.csv
-			char levelPath[64]{};
-			std::snprintf(levelPath, sizeof(levelPath), "assets/maps/level%02d.csv", nextLevel);
-
-			// Only commit if load succeeds
-			if (m_map.LoadCSV(levelPath)) {
-				m_currentLevel = nextLevel;
-
-				// RestartGame() should rebuild entities/pickups based on the NEW map
-				RestartGame();
-
-				// Re-center camera immediately (we early-return during Win state)
-				int winW = 0, winH = 0;
-				platform.GetWindowSize(winW, winH);
-				Vec2 halfScreen{ winW * 0.5f, winH * 0.5f };
-				m_camera.SetPosition(m_entities[m_playerIndex].pos - halfScreen);
-			}
-			else {
-				std::printf("[LEVEL] Failed to load %s (staying on level %d)\n", levelPath, m_currentLevel);
-			}
-		}
-
-		dbg.playerPos = player.pos;
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
-
 
 	// --------------------
 	// HOT-RELOAD POLLING (runs even if paused)
@@ -442,13 +446,13 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 			}
 
 			if (m_pickupsRemaining <= 0) {
-				m_gameWin = true;
+				m_flowState = FlowState::Win;
 			}
 		}
 	}
 
 	if (player.health <= 0) {
-		m_gameOver = true;
+		m_flowState = FlowState::Lose;
 	}
 
 	// --------------------
@@ -692,6 +696,8 @@ void Game::RespawnEnemiesFromConfig() {
 }
 
 void Game::RestartGame() {
+	m_flowState = FlowState::Playing;
+
 	m_gameOver = false;
 	m_gameWin = false;
 
