@@ -56,6 +56,14 @@ private:
     float m_shakeDuration = 0.0f;
     float m_shakeStrength = 0.0f;
 
+    // Power-up timers
+    float m_speedBuffTimer = 0.0f;
+    float m_speedBuffDuration = 3.0f;
+    float m_speedMultiplier = 1.5f;
+
+    float m_shieldTimer = 0.0f;
+    float m_shieldDuration = 2.5f;
+
     std::filesystem::file_time_type m_cfgTimestamp{};
     float m_cfgPollTimer = 0.0f;
 
@@ -75,7 +83,7 @@ private:
     int  m_pickupsRemaining = 0;
     bool m_gameWin = false;
 
-    void SpawnPickupAt(const Vec2& worldPos);
+    void SpawnPickupAt(const Vec2& worldPos, PickupKind kind);
 
     int m_tokensCollected = 0;
     int m_tokensTotal = 0;
@@ -84,7 +92,7 @@ private:
 
     bool m_requestQuit = false;
     
-    enum class FlowState { Playing, Win, Lose };
+    enum class FlowState { Playing, Win, Lose, QuitConfirm };
     FlowState m_flowState = FlowState::Playing;
 
 };

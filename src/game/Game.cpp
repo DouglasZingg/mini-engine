@@ -146,6 +146,11 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	prevReturn = returnNow;
 	prevR = rNow;
 
+	static bool prevEscape = false;
+	bool escapeNow = input.Down(Key::Escape);
+	bool escapePressed = escapeNow && !prevEscape;
+	prevEscape = escapeNow;
+
 	// Keep legacy flags in sync for any old render paths
 	m_gameWin = (m_flowState == FlowState::Win);
 	m_gameOver = (m_flowState == FlowState::Lose);
@@ -187,10 +192,14 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 
-	if (input.Down(Key::Escape)) {
-		m_requestQuit = true;
-		return; 
-	}
+	if (escapePressed) {
+        // Pause/quit confirmation overlay (polish)
+        m_flowState = FlowState::QuitConfirm;
+        // keep debug info updated
+        dbg.playerPos = player.pos;
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
 
 	// --------------------
 	// HOT-RELOAD POLLING (runs even if paused)
@@ -272,7 +281,20 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	m_camera.SetZoom(dbg.zoom);
 
 	// --------------------
-	// INPUT SYSTEM (player)
+	
+	// --------------------
+	// Power-up timers
+	// --------------------
+	if (m_speedBuffTimer > 0.0f) {
+		m_speedBuffTimer -= fixedDt;
+		if (m_speedBuffTimer < 0.0f) m_speedBuffTimer = 0.0f;
+	}
+	if (m_shieldTimer > 0.0f) {
+		m_shieldTimer -= fixedDt;
+		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
+	}
+
+// INPUT SYSTEM (player)
 	// --------------------
 	player.prevPos = player.pos;
 
@@ -283,7 +305,8 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	if (input.Down(Key::D)) move.x += 1.0f;
 
 	// (no normalization yet, intentionally simple)
-	player.pos = player.pos + move * (m_playerSpeed * fixedDt);
+	const float speedMult = (m_speedBuffTimer > 0.0f) ? m_speedMultiplier : 1.0f;
+	player.pos = player.pos + move * ((m_playerSpeed * speedMult) * fixedDt);
 	ClampPlayerToWorld(player);
 
 	m_map.ResolveCircleCollision(player.pos, player.radius);
@@ -408,10 +431,20 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 			// DAMAGE (only if not invulnerable)
 			if (player.invulnTimer <= 0.0f) {
+				// Shield absorbs one hit
+				if (m_shieldTimer > 0.0f) {
+					m_shieldTimer = 0.0f;
+					player.invulnTimer = 0.15f; // tiny grace period
+					// Small camera shake feedback
+					m_shakeDuration = 0.12f;
+					m_shakeTime = m_shakeDuration;
+					m_shakeStrength = dbg.shakeStrength * 0.6f;
+				}
+				else {
 				player.health -= 1;
 				if (player.health < 0) player.health = 0;
 
-				player.invulnTimer = m_invulnSeconds;
+					player.invulnTimer = m_invulnSeconds;
 
 				// Knockback impulse (pos-based for now)
 				player.pos = player.pos + n * (m_hitKnockback * fixedDt);
@@ -420,6 +453,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 				m_shakeDuration = 0.20f;
 				m_shakeTime = m_shakeDuration;
 				m_shakeStrength = dbg.shakeStrength;
+				}
 			}
 
 			// Keep player valid after collision pushes
@@ -431,27 +465,44 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 	// --------------------
+	// --------------------
 	// PICKUPS (player vs pickups)
 	// --------------------
 	for (Entity& e : m_entities) {
 		if (!e.active) continue;
 		if (e.type != EntityType::Pickup) continue;
 
-		if (CheckCollision(player, e)) {
-			e.active = false;
-			m_score += e.value;
+		if (!CheckCollision(player, e)) continue;
 
-			if (m_pickupsRemaining > 0) {
-				m_pickupsRemaining--;
-			}
+		e.active = false;
 
-			if (m_pickupsRemaining <= 0) {
+		switch (e.pickupKind) {
+		case PickupKind::Token:
+			m_tokensCollected += 1;
+			if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
+			m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
+			if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
 				m_flowState = FlowState::Win;
 			}
+			break;
+		case PickupKind::Health:
+			// +1 heart (clamped)
+			if (player.health < m_playerMaxHealth) player.health += 1;
+			break;
+		case PickupKind::Speed:
+			// Temporary movement boost
+			m_speedBuffTimer = m_speedBuffDuration;
+			break;
+		case PickupKind::Shield:
+			// One-hit protection (timer also useful for UI)
+			m_shieldTimer = m_shieldDuration;
+			break;
+		default:
+			break;
 		}
 	}
 
-	if (player.health <= 0) {
+if (player.health <= 0) {
 		m_flowState = FlowState::Lose;
 	}
 
@@ -572,7 +623,14 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		}
 		else if (e.type == EntityType::Pickup) {
 			Vec2 screen = m_camera.WorldToScreen(e.pos);
-			platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8 , 16, 16, 255, 255, 0);
+			// Color by pickup kind
+			switch (e.pickupKind) {
+			case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break; // yellow
+			case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 220, 80); break; // green
+			case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 160, 255); break; // blue
+			case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180,  80, 220); break; // purple
+			default:                platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
+			}
 		}
 		else {
 			if (dbg.showPaths && e.type == EntityType::Enemy) {
@@ -606,18 +664,52 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		platform.DrawFilledRect(x + i * 22, y, 18, 18, 60, 60, 60);
 	}
 
-	// Score pips (top-left)
-// Tokens row (below hearts) using m_score
+	// Tokens row (below hearts)
+	// Shows collected (yellow) and remaining (gray) tokens.
 	const int tokenSize = 18;     // same as hearts
 	const int tokenStep = 22;     // same spacing as hearts
 	const int tokenX = 16;
 	const int tokenY = 16 + tokenStep; // one row below hearts
 
-	for (int i = 0; i < m_score; ++i) {
-		platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
+	const int totalTokens = std::max(0, m_tokensTotal);
+	const int collected = std::max(0, std::min(m_tokensCollected, totalTokens));
+
+	for (int i = 0; i < totalTokens; ++i) {
+		if (i < collected) {
+			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
+		} else {
+			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 60, 60, 60);
+		}
 	}
 
-	// --------------------
+	// Buff indicators (same size as hearts/tokens)
+	const int buffY = tokenY + tokenStep;
+	// Speed
+	if (m_speedBuffTimer > 0.0f) platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 80, 160, 255);
+	else                         platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 40, 40, 40);
+	// Shield
+	if (m_shieldTimer > 0.0f)    platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 180, 80, 220);
+	else                         platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 40, 40, 40);
+
+	if (m_flowState == FlowState::QuitConfirm) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+
+		// Dim background
+		platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
+
+		// Center box
+		const int bw = 560;
+		const int bh = 120;
+		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 40, 40, 40);
+
+		// Two hint bars (no text renderer yet)
+		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 20, 380, 24, 70, 70, 70);   // "Quit? Enter"
+		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 60, 380, 24, 70, 70, 70);   // "Esc to cancel"
+		return;
+		}
+
+// --------------------
 	// Game Over overlay (no text renderer yet)
 	// --------------------
 	if (m_gameOver) {
@@ -752,12 +844,36 @@ void Game::RestartGame() {
 		}
 	}
 
-	// 3) Spawn pickups from map (tile 2)
+	// 3) Spawn pickups from map (multiple tile IDs)
+	//    2 = Token (counts toward win)
+	//    5 = Health (+1 heart)
+	//    6 = Speed (temporary speed boost)
+	//    7 = Shield (one-hit protection)
+	constexpr int kTileToken  = 2;
+	constexpr int kTileHealth = 5;
+	constexpr int kTileSpeed  = 6;
+	constexpr int kTileShield = 7;
+
+	m_pickupsRemaining = 0;
+	m_tokensCollected = 0;
 	for (int ty = 0; ty < m_map.Height(); ++ty) {
 		for (int tx = 0; tx < m_map.Width(); ++tx) {
-			if (m_map.At(tx, ty) == kTilePickup) {
+			const int tile = m_map.At(tx, ty);
+			if (tile == kTileToken || tile == kTileHealth || tile == kTileSpeed || tile == kTileShield) {
 				Vec2 center = m_map.TileToWorldCenter(tx, ty);
-				SpawnPickupAt(center);
+				if (tile == kTileToken) {
+					SpawnPickupAt(center, PickupKind::Token);
+					m_pickupsRemaining++;
+				}
+				else if (tile == kTileHealth) {
+					SpawnPickupAt(center, PickupKind::Health);
+				}
+				else if (tile == kTileSpeed) {
+					SpawnPickupAt(center, PickupKind::Speed);
+				}
+				else if (tile == kTileShield) {
+					SpawnPickupAt(center, PickupKind::Shield);
+				}
 			}
 		}
 	}
@@ -765,12 +881,18 @@ void Game::RestartGame() {
 	m_tokensTotal = m_pickupsRemaining;
 }
 
-void Game::SpawnPickupAt(const Vec2& worldPos)
+void Game::SpawnPickupAt(const Vec2& worldPos, PickupKind kind)
 {
-	Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);
-	p.value = 1;
-	p.active = true;
+    Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);
+    p.active = true;
+    p.pickupKind = kind;
 
-	m_pickupsRemaining++;
+    // Optional per-kind value (only Token contributes to win/score)
+    if (kind == PickupKind::Token) {
+        p.value = 1;
+    } else {
+        p.value = 0;
+    }
 }
+
 

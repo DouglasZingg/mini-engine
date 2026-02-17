@@ -5,6 +5,14 @@
 
 enum class EntityType { Player, Enemy, Pickup };
 
+
+enum class PickupKind {
+    Token = 0,
+    Health,
+    Speed,
+    Shield
+};
+
 using EntityId = uint32_t;  
 enum class AIState { Idle, Seek };
 
@@ -37,4 +45,7 @@ struct Entity {
 
     bool active = true;
     int value = 1;      // for pickups
+
+    // Pickup behavior
+    PickupKind pickupKind = PickupKind::Token;
 };
