@@ -15,7 +15,7 @@ enum class PickupKind {
 
 using EntityId = uint32_t;  
 enum class AIState { Idle, Seek };
-
+enum class EnemyKind : uint8_t { Chaser = 0, Fast = 1, Tank = 2 };
 struct PathState {
     std::vector<Vec2> waypoints; // world positions
     int index = 0;
@@ -34,6 +34,11 @@ struct Entity {
     float radius = 16.0f;
 
     float aggroRadius = 350.0f;  
+    EnemyKind enemyKind = EnemyKind::Chaser;
+
+    // Optional per-entity override. If 0, code will use m_enemySpeed.
+    float moveSpeed = 0.0f;
+
 
     // Combat (mostly for player)
     int health = 3;

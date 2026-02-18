@@ -338,7 +338,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		if (e.ai == AIState::Seek && distSq > 0.0001f) {
 			const float repathInterval = 0.25f;  // 4x/sec
 			const float waypointReach = 8.0f;
-			const float enemySpeed = m_enemySpeed;
+			const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
 
 			TileCoord goalT = m_map.WorldToTile(player.pos);
 
@@ -644,7 +644,13 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 			const int size = (int)(e.radius * 2.0f);
 			const int drawX = (int)(screenPos.x - size * 0.5f);
 			const int drawY = (int)(screenPos.y - size * 0.5f);
-			platform.DrawFilledRect(drawX, drawY, size, size, 200, 80, 80);
+			int r = 200, g = 80, b = 80; // chaser default
+			switch (e.enemyKind) {
+			case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
+			case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
+			default: break;
+			}
+			platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
 		}
 	}
 
@@ -809,7 +815,9 @@ void Game::RestartGame() {
 	m_nextEntityId = 1;
 
 	constexpr int kTilePickup = 2;
-	constexpr int kTileEnemy  = 3;
+	constexpr int kTileEnemy  = 3;  // chaser
+	constexpr int kTileEnemyFast = 8;
+	constexpr int kTileEnemyTank = 9;
 	constexpr int kTilePlayer = 4;
 
 	// 1) Find player spawn from map (tile 4). Fallback to config if none.
@@ -833,16 +841,6 @@ void Game::RestartGame() {
 	player.invulnDuration = m_invulnSeconds;
 	player.pos = playerSpawn;
 	player.prevPos = player.pos;
-
-	// 2) Spawn enemies from map (tile 3)
-	for (int ty = 0; ty < m_map.Height(); ++ty) {
-		for (int tx = 0; tx < m_map.Width(); ++tx) {
-			if (m_map.At(tx, ty) == kTileEnemy) {
-				Vec2 center = m_map.TileToWorldCenter(tx, ty);
-				CreateEntity(EntityType::Enemy, center, 16.0f);
-			}
-		}
-	}
 
 	// 3) Spawn pickups from map (multiple tile IDs)
 	//    2 = Token (counts toward win)
@@ -875,6 +873,25 @@ void Game::RestartGame() {
 					SpawnPickupAt(center, PickupKind::Shield);
 				}
 			}
+
+			if (tile == 3 || tile == 8 || tile == 9) {
+				Vec2 center = m_map.TileToWorldCenter(tx, ty);
+
+				Entity& enemy = CreateEntity(EntityType::Enemy, center, 14.0f);
+				enemy.enemyKind = EnemyKind::Chaser;
+				enemy.moveSpeed = 0.0f; // uses m_enemySpeed
+
+				if (tile == 8) { // Fast
+					enemy.enemyKind = EnemyKind::Fast;
+					enemy.radius = 12.0f;
+					enemy.moveSpeed = m_enemySpeed * 1.6f;
+				}
+				else if (tile == 9) { // Tank
+					enemy.enemyKind = EnemyKind::Tank;
+					enemy.radius = 20.0f;
+					enemy.moveSpeed = m_enemySpeed * 0.65f;
+				}
+			}
 		}
 	}
 
@@ -894,5 +911,4 @@ void Game::SpawnPickupAt(const Vec2& worldPos, PickupKind kind)
         p.value = 0;
     }
 }
-
 
