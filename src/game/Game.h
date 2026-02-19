@@ -95,4 +95,14 @@ private:
     enum class FlowState { Playing, Win, Lose, QuitConfirm };
     FlowState m_flowState = FlowState::Playing;
 
+    // player
+    float m_playerMoveSpeed = 260.0f;
+    float m_knockbackStrength = 650.0f;   // impulse strength
+    float m_knockbackDamping = 10.0f;     // higher = stops faster
+    float m_hitstunSeconds = 0.12f;
+    float m_iframesSeconds = 0.75f;
+
+    // enemies
+    float m_enemyKnockbackStrength = 450.0f;
+    float m_enemyHitstunSeconds = 0.08f;
 };

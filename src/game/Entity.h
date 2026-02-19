@@ -43,7 +43,7 @@ struct Entity {
     // Combat (mostly for player)
     int health = 3;
     float invulnTimer = 0.0f;        // seconds remaining
-    float invulnDuration = 0.75f;    // seconds
+    float invulnDuration = 1.5f;    // seconds
     Vec2 velocity{ 0,0 };            // for knockback / movement smoothing (optional)
 
     PathState path;
@@ -53,4 +53,9 @@ struct Entity {
 
     // Pickup behavior
     PickupKind pickupKind = PickupKind::Token;
+
+    // --- Combat polish ---
+    Vec2  vel{ 0,0 };              // velocity used for knockback and movement smoothing
+    float hitstun = 0.0f;        // seconds remaining unable to act
+    bool  dead = false;          // death flag
 };

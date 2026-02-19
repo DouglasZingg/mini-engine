@@ -131,6 +131,22 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
 	Entity& player = m_entities[m_playerIndex];
 
+	auto TickCombatTimers = [&](Entity& e) {
+		if (e.hitstun > 0.0f) {
+			e.hitstun -= fixedDt;
+			if (e.hitstun < 0.0f) e.hitstun = 0.0f;
+		}
+		if (e.invulnTimer > 0.0f) {
+			e.invulnTimer -= fixedDt;
+			if (e.invulnTimer < 0.0f) e.invulnTimer = 0.0f;
+		}
+		};
+
+	for (Entity& e : m_entities) {
+		if (!e.active) continue;
+		TickCombatTimers(e);
+	}
+
 	// --------------------
 // AUTHORITATIVE FLOW INPUT (edge-triggered)
 // --------------------
@@ -298,17 +314,35 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	player.prevPos = player.pos;
 
-	Vec2 move{ 0, 0 };
-	if (input.Down(Key::W)) move.y -= 1.0f;
-	if (input.Down(Key::S)) move.y += 1.0f;
-	if (input.Down(Key::A)) move.x -= 1.0f;
-	if (input.Down(Key::D)) move.x += 1.0f;
+	if (player.hitstun <= 0.0f) {
+		Vec2 move{ 0,0 };
+		if (input.Down(Key::W)) move.y -= 1.0f;
+		if (input.Down(Key::S)) move.y += 1.0f;
+		if (input.Down(Key::A)) move.x -= 1.0f;
+		if (input.Down(Key::D)) move.x += 1.0f;
 
-	// (no normalization yet, intentionally simple)
-	const float speedMult = (m_speedBuffTimer > 0.0f) ? m_speedMultiplier : 1.0f;
-	player.pos = player.pos + move * ((m_playerSpeed * speedMult) * fixedDt);
+		// normalize if moving diagonally
+		float lenSq = move.x * move.x + move.y * move.y;
+		if (lenSq > 0.0001f) {
+			float invLen = 1.0f / std::sqrt(lenSq);
+			move.x *= invLen; move.y *= invLen;
+		}
+
+		// “desired” velocity from input
+		Vec2 desired = move * m_playerMoveSpeed;
+
+		// blend toward desired (keeps knockback snappy but controllable)
+		const float accel = 18.0f;
+		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
+	}
+
+	// knockback damping (always runs)
+	player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
+
+	player.pos = player.pos + player.vel * fixedDt;
+
+	// keep existing
 	ClampPlayerToWorld(player);
-
 	m_map.ResolveCircleCollision(player.pos, player.radius);
 
 	// --------------------
@@ -431,29 +465,25 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 			// DAMAGE (only if not invulnerable)
 			if (player.invulnTimer <= 0.0f) {
-				// Shield absorbs one hit
-				if (m_shieldTimer > 0.0f) {
-					m_shieldTimer = 0.0f;
-					player.invulnTimer = 0.15f; // tiny grace period
-					// Small camera shake feedback
-					m_shakeDuration = 0.12f;
-					m_shakeTime = m_shakeDuration;
-					m_shakeStrength = dbg.shakeStrength * 0.6f;
-				}
-				else {
 				player.health -= 1;
-				if (player.health < 0) player.health = 0;
+				player.invulnTimer = m_iframesSeconds;
+				player.hitstun = m_hitstunSeconds;
 
-					player.invulnTimer = m_invulnSeconds;
+				// knockback direction: enemy -> player
+				Vec2 d = player.pos - e.pos;
+				float distSq = d.x * d.x + d.y * d.y;
+				if (distSq < 0.0001f) distSq = 0.0001f;
+				float invLen = 1.0f / std::sqrt(distSq);
+				Vec2 n{ d.x * invLen, d.y * invLen };
 
-				// Knockback impulse (pos-based for now)
-				player.pos = player.pos + n * (m_hitKnockback * fixedDt);
+				// impulse
+				player.vel = player.vel + n * m_knockbackStrength;
 
 				// Camera shake
 				m_shakeDuration = 0.20f;
 				m_shakeTime = m_shakeDuration;
 				m_shakeStrength = dbg.shakeStrength;
-				}
+				
 			}
 
 			// Keep player valid after collision pushes
