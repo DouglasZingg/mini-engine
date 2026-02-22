@@ -45,8 +45,7 @@ public:
     void DrawFilledRect(int x, int y, int w, int h,
                         std::uint8_t r, std::uint8_t g, std::uint8_t b);
 
-    // Debug helper: proves render loop + vsync are working.
-    void DrawDebugTestRect(float timeSeconds);
+    // (Removed) legacy debug test rect helper.
 
     SDL_Window* WindowRaw() const { return m_window; }
 

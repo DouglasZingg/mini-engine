@@ -3,7 +3,8 @@
 #include "engine/Math.h"
 
 struct DebugState {
-    bool showUI = true;
+    // Start with debug UI hidden; toggle in-game (Tab).
+    bool showUI = false;
     bool showGrid = true;
     bool showColliders = false;
     bool pause = false;

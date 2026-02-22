@@ -470,14 +470,14 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 				player.hitstun = m_hitstunSeconds;
 
 				// knockback direction: enemy -> player
-				Vec2 d = player.pos - e.pos;
-				float distSq = d.x * d.x + d.y * d.y;
+				d = player.pos - e.pos;
+				distSq = d.x * d.x + d.y * d.y;
 				if (distSq < 0.0001f) distSq = 0.0001f;
 				float invLen = 1.0f / std::sqrt(distSq);
-				Vec2 n{ d.x * invLen, d.y * invLen };
+				Vec2 n1{ d.x * invLen, d.y * invLen };
 
 				// impulse
-				player.vel = player.vel + n * m_knockbackStrength;
+				player.vel = player.vel + n1 * m_knockbackStrength;
 
 				// Camera shake
 				m_shakeDuration = 0.20f;
@@ -844,10 +844,6 @@ void Game::RestartGame() {
 	m_playerIndex = 0;
 	m_nextEntityId = 1;
 
-	constexpr int kTilePickup = 2;
-	constexpr int kTileEnemy  = 3;  // chaser
-	constexpr int kTileEnemyFast = 8;
-	constexpr int kTileEnemyTank = 9;
 	constexpr int kTilePlayer = 4;
 
 	// 1) Find player spawn from map (tile 4). Fallback to config if none.

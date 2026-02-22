@@ -155,22 +155,7 @@ void SdlPlatform::DrawFilledRect(int x, int y, int w, int h,
     SDL_RenderFillRect(m_renderer, &rc);
 }
 
-void SdlPlatform::DrawDebugTestRect(float timeSeconds) {
-    int w = 0, h = 0;
-    SDL_GetWindowSize(m_window, &w, &h);
-
-    const int rectW = 80;
-    const int rectH = 80;
-
-    const float t = timeSeconds;
-    const int x = static_cast<int>((w - rectW) * (0.5f + 0.5f * std::sin(t)));
-    const int y = h / 2 - rectH / 2;
-
-    SDL_Rect r{ x, y, rectW, rectH };
-    SDL_SetRenderDrawColor(m_renderer, 220, 220, 230, 255);
-    SDL_RenderFillRect(m_renderer, &r);
-}
-
+// (Removed) legacy debug test rect helper.
 void SdlPlatform::SetEventCallback(SdlEventCallback cb, void* userData) {
     m_eventCb = cb;
     m_eventUser = userData;
