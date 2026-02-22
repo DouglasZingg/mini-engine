@@ -51,6 +51,8 @@ public:
 
     using SdlEventCallback = void(*)(void* userData, const void* sdlEvent);
     void SetEventCallback(SdlEventCallback cb, void* userData);
+
+    void ToggleFullscreen();
 private:
     SDL_Window*   m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
@@ -61,4 +63,15 @@ private:
 
     SdlEventCallback m_eventCb = nullptr;
     void* m_eventUser = nullptr;
+
+    // Fullscreen toggle state
+    bool m_isFullscreen = false;
+
+    // Remember windowed placement so we can restore it after fullscreen
+    int m_windowedX = 0;
+    int m_windowedY = 0;
+    int m_windowedW = 1280;
+    int m_windowedH = 720;
+
+
 };

@@ -12,21 +12,22 @@ bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
         return false;
     }
 
-    // Borderless fullscreen desktop is the most stable "fullscreen" for development.
-    // If you want windowed mode, remove SDL_WINDOW_FULLSCREEN_DESKTOP.
-    const Uint32 windowFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP;
-
     m_window = SDL_CreateWindow(
         title,
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        windowW, windowH,
-        windowFlags
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        windowW,
+        windowH,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED
     );
 
     if (!m_window) {
         std::printf("[ERROR] SDL_CreateWindow failed: %s\n", SDL_GetError());
         return false;
     }
+
+    // Start maximized (still windowed; respects taskbar, etc.).
+    SDL_MaximizeWindow(m_window);
 
     // Accelerated + vsync renderer (good default for a tiny engine).
     m_renderer = SDL_CreateRenderer(m_window, -1,
@@ -90,6 +91,21 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
         }
     }
 
+    if (e.type == SDL_KEYDOWN && e.key.repeat == 0)
+    {
+        const SDL_Keycode key = e.key.keysym.sym;
+        const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
+
+        if (key == SDLK_F11)
+        {
+            ToggleFullscreen();
+        }
+        else if (key == SDLK_RETURN && (mod & KMOD_ALT))
+        {
+            ToggleFullscreen();
+        }
+    }
+
     // ---- Input snapshot ----
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     outFrame.input.SetKey(Key::W, keys[SDL_SCANCODE_W] != 0);
@@ -100,6 +116,7 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     outFrame.input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
     outFrame.input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
     outFrame.input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
+    outFrame.input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
 
 
     // Occasional logging for sanity (once per second).
@@ -159,4 +176,23 @@ void SdlPlatform::DrawFilledRect(int x, int y, int w, int h,
 void SdlPlatform::SetEventCallback(SdlEventCallback cb, void* userData) {
     m_eventCb = cb;
     m_eventUser = userData;
+}
+
+void SdlPlatform::ToggleFullscreen() {
+    if (!m_window)
+        return;
+
+    m_isFullscreen = !m_isFullscreen;
+
+    if (m_isFullscreen) {
+        // True fullscreen (changes display mode)
+        SDL_SetWindowFullscreen(m_window, SDL_WINDOW_FULLSCREEN);
+    }
+    else {
+        // Back to windowed
+        SDL_SetWindowFullscreen(m_window, 0);
+
+        // Restore windowed maximized state
+        SDL_MaximizeWindow(m_window);
+    }
 }

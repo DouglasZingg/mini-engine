@@ -7,6 +7,7 @@ enum class Key : uint8_t {
     Tab,
     Return,
     R,
+    F11,
     Count
 };
 

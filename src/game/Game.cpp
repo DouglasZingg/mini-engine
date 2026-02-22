@@ -255,6 +255,15 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 	prevTab = tabNow;
 
+	static bool prevF11 = false;
+	bool f11Now = input.Down(Key::F11);
+
+	if (f11Now && !prevF11) {
+		platform.ToggleFullscreen();
+	}
+
+	prevF11 = f11Now;
+
 	// --------------------
 	// PAUSE HANDLING
 	// --------------------
