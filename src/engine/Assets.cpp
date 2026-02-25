@@ -5,11 +5,15 @@
 
 bool Assets::Init(SdlPlatform& platform)
 {
+    if (!m_font.LoadBMP(platform, AssetPath("assets/font.bmp").c_str()))
+        return false;
+
     return m_player.LoadBMP(platform, AssetPath("assets/player.bmp").c_str());
 }
 
 
 void Assets::Shutdown()
 {
+	m_font.Destroy();
     m_player.Destroy();
 }

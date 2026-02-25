@@ -53,6 +53,9 @@ public:
     void SetEventCallback(SdlEventCallback cb, void* userData);
 
     void ToggleFullscreen();
+
+    void DrawTextBMP(const SdlTexture& font, int x, int y, const char* text,
+        int glyphW, int glyphH, int cols, int firstChar = 32, int scale = 2);
 private:
     SDL_Window*   m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;

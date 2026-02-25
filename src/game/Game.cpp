@@ -31,6 +31,36 @@ static void SeparateEntities(Entity& a, Entity& b) {
 	b.pos = b.pos - n * (penetration * 0.5f);
 }
 
+static void DrawCenteredOverlay(SdlPlatform& platform, const SdlTexture& font,
+	const char* title, const char* bodyA, const char* bodyB)
+{
+	int w = 0, h = 0;
+	platform.GetWindowSize(w, h);
+
+	// background
+	platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
+
+	// panel
+	const int pw = 760;
+	const int ph = 240;
+	const int px = (w - pw) / 2;
+	const int py = (h - ph) / 2;
+	platform.DrawFilledRect(px, py, pw, ph, 30, 30, 30);
+
+	// text
+	const int glyphW = 8, glyphH = 8, cols = 16, scale = 3;
+
+	int tx = px + 24;
+	int ty = py + 24;
+	platform.DrawTextBMP(font, tx, ty, title, glyphW, glyphH, cols, 32, scale);
+
+	ty += glyphH * scale * 2;
+	platform.DrawTextBMP(font, tx, ty, bodyA, glyphW, glyphH, cols, 32, 2);
+
+	ty += glyphH * 2 * 2;
+	platform.DrawTextBMP(font, tx, ty, bodyB, glyphW, glyphH, cols, 32, 2);
+}
+
 // -----------------------------
 // ECS-lite: entity creation
 // -----------------------------
@@ -175,6 +205,12 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// FLOW STATE HANDLING
 	// --------------------
 	if (m_flowState == FlowState::Win) {
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"YOU WIN!",
+			"ENTER: Next Level",
+			"ESC: Quit   R: Restart Level"
+		);
+
 		// Advance ONLY on key press (NOT every frame)
 		if (returnPressed) {
 			// Next level (wrap or clamp)
@@ -196,6 +232,12 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 	if (m_flowState == FlowState::Lose) {
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"YOU WIN!",
+			"ENTER: Next Level",
+			"ESC: Quit   R: Restart Level"
+		);
+
 		// Restart ONLY on key press
 		if (rPressed) {
 			RestartGame();

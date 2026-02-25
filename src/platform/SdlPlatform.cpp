@@ -196,3 +196,35 @@ void SdlPlatform::ToggleFullscreen() {
         SDL_MaximizeWindow(m_window);
     }
 }
+
+void SdlPlatform::DrawTextBMP(const SdlTexture& font, int x, int y, const char* text,
+    int glyphW, int glyphH, int cols, int firstChar, int scale)
+{
+    if (!text) return;
+
+    int penX = x;
+    int penY = y;
+
+    for (const char* p = text; *p; ++p)
+    {
+        char c = *p;
+
+        if (c == '\n') { penX = x; penY += glyphH * scale; continue; }
+        if (c == '\t') { penX += glyphW * scale * 4; continue; }
+
+        int code = (unsigned char)c;
+        int idx = code - firstChar;
+        if (idx < 0) { penX += glyphW * scale; continue; }
+
+        int sx = (idx % cols) * glyphW;
+        int sy = (idx / cols) * glyphH;
+
+        SDL_Rect src{ sx, sy, glyphW, glyphH };
+        SDL_Rect dst{ penX, penY, glyphW * scale, glyphH * scale };
+
+        SDL_Texture* t = font.Raw(); // however you expose SDL_Texture*
+        if (t) SDL_RenderCopy(m_renderer, t, &src, &dst);
+
+        penX += glyphW * scale;
+    }
+}

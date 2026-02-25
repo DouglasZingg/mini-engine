@@ -13,6 +13,10 @@ public:
     void Shutdown();
 
     const SdlTexture& Player() const { return m_player; }
+    // Add:
+    const SdlTexture& Font() const { return m_font; }
+
 private:
+    SdlTexture m_font;
     SdlTexture m_player;
 };
