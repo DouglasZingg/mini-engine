@@ -82,7 +82,7 @@ bool Game::Init(SdlPlatform& platform) {
 	if (!m_assets.Init(platform))
 		return false;
 
-	m_map.LoadCSV("assets/maps/level01.csv");
+	m_map.LoadCSV(AssetPath("assets/maps/level01.csv").c_str());
 
 	// Load config (speeds, world size, etc.)
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
@@ -93,7 +93,7 @@ bool Game::Init(SdlPlatform& platform) {
 
 	// Hot-reload timestamp init
 	try {
-		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
+		m_cfgTimestamp = std::filesystem::last_write_time(AssetPath("assets/config.json"));
 	}
 	catch (...) {}
 	m_cfgPollTimer = 0.0f;
@@ -206,9 +206,9 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	if (m_flowState == FlowState::Win) {
 		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU WIN!",
-			"ENTER: Next Level",
-			"ESC: Quit   R: Restart Level"
+			"YOU LOSE!",
+			"R: Restart Level",
+			"ESC: Quit"
 		);
 
 		// Advance ONLY on key press (NOT every frame)
@@ -219,7 +219,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 			char mapPath[64];
 			std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
-			m_map.LoadCSV(mapPath);
+			m_map.LoadCSV(AssetPath(mapPath).c_str());
 
 			RestartGame();                 // rebuilds entities from CSV markers
 			m_flowState = FlowState::Playing;
@@ -233,14 +233,33 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 	if (m_flowState == FlowState::Lose) {
 		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU WIN!",
-			"ENTER: Next Level",
-			"ESC: Quit   R: Restart Level"
+			"YOU LOSE!",
+			"R: Restart Level",
+			"ESC: Quit"
 		);
 
 		// Restart ONLY on key press
 		if (rPressed) {
 			RestartGame();
+			m_flowState = FlowState::Playing;
+		}
+
+		dbg.playerPos = player.pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
+
+	if (m_flowState == FlowState::QuitConfirm) {
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"QUIT?",
+			"ENTER: Quit",
+			"ESC: Back"
+		);
+
+		if (returnPressed) {
+			m_requestQuit = true;
+		}
+		if (escapePressed) {
 			m_flowState = FlowState::Playing;
 		}
 
@@ -266,10 +285,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	if (m_cfgPollTimer >= 1.0f) {
 		m_cfgPollTimer = 0.0f;
 		try {
-			auto t = std::filesystem::last_write_time("assets/config.json");
+			auto t = std::filesystem::last_write_time(AssetPath("assets/config.json"));
 			if (t != m_cfgTimestamp) {
 				m_cfgTimestamp = t;
-				ReloadConfig("assets/config.json");
+				ReloadConfig(AssetPath("assets/config.json").c_str());
 				std::printf("[HOTRELOAD] config.json reloaded\n");
 			}
 		}
@@ -281,7 +300,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	if (dbg.requestReloadConfig) {
 		dbg.requestReloadConfig = false;
-		ReloadConfig("assets/config.json");
+		ReloadConfig(AssetPath("assets/config.json").c_str());
 	}
 
 	// --------------------
@@ -297,14 +316,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 	prevTab = tabNow;
 
-	static bool prevF11 = false;
-	bool f11Now = input.Down(Key::F11);
-
-	if (f11Now && !prevF11) {
-		platform.ToggleFullscreen();
-	}
-
-	prevF11 = f11Now;
+	// Fullscreen hotkeys are handled in the platform event loop (SdlPlatform::Pump).
 
 	// --------------------
 	// PAUSE HANDLING
