@@ -87,8 +87,7 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
             return false;
         }
 
-        // Fullscreen toggle hotkeys must be handled INSIDE the event loop.
-        // (Outside the loop, `e` may be uninitialized if there were no events.)
+        // Fullscreen hotkeys (safe: handled per-event)
         if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
             const SDL_Keycode key = e.key.keysym.sym;
             const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
@@ -103,6 +102,21 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
 
         if (m_eventCb) {
             m_eventCb(m_eventUser, &e);
+        }
+    }
+
+    if (e.type == SDL_KEYDOWN && e.key.repeat == 0)
+    {
+        const SDL_Keycode key = e.key.keysym.sym;
+        const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
+
+        if (key == SDLK_F11)
+        {
+            ToggleFullscreen();
+        }
+        else if (key == SDLK_RETURN && (mod & KMOD_ALT))
+        {
+            ToggleFullscreen();
         }
     }
 

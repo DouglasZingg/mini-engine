@@ -82,7 +82,7 @@ bool Game::Init(SdlPlatform& platform) {
 	if (!m_assets.Init(platform))
 		return false;
 
-	m_map.LoadCSV(AssetPath("assets/maps/level01.csv").c_str());
+	m_map.LoadCSV("assets/maps/level01.csv");
 
 	// Load config (speeds, world size, etc.)
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
@@ -93,7 +93,7 @@ bool Game::Init(SdlPlatform& platform) {
 
 	// Hot-reload timestamp init
 	try {
-		m_cfgTimestamp = std::filesystem::last_write_time(AssetPath("assets/config.json"));
+		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
 	}
 	catch (...) {}
 	m_cfgPollTimer = 0.0f;
@@ -205,13 +205,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// FLOW STATE HANDLING
 	// --------------------
 	if (m_flowState == FlowState::Win) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU LOSE!",
-			"R: Restart Level",
-			"ESC: Quit"
-		);
-
-		// Advance ONLY on key press (NOT every frame)
+// Advance ONLY on key press (NOT every frame)
 		if (returnPressed) {
 			// Next level (wrap or clamp)
 			m_currentLevel++;
@@ -219,11 +213,20 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 			char mapPath[64];
 			std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
-			m_map.LoadCSV(AssetPath(mapPath).c_str());
+			m_map.LoadCSV(mapPath);
 
 			RestartGame();                 // rebuilds entities from CSV markers
 			m_flowState = FlowState::Playing;
 		}
+		// Quit / restart
+		if (escapePressed) {
+			m_requestQuit = true;
+		}
+		if (rPressed) {
+			RestartGame();
+			m_flowState = FlowState::Playing;
+		}
+
 
 		// Update debug info and stop simulation while in win screen
 		dbg.playerPos = player.pos;
@@ -232,36 +235,16 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 	if (m_flowState == FlowState::Lose) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU LOSE!",
-			"R: Restart Level",
-			"ESC: Quit"
-		);
-
-		// Restart ONLY on key press
+// Restart ONLY on key press
 		if (rPressed) {
 			RestartGame();
 			m_flowState = FlowState::Playing;
 		}
-
-		dbg.playerPos = player.pos;
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
-
-	if (m_flowState == FlowState::QuitConfirm) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"QUIT?",
-			"ENTER: Quit",
-			"ESC: Back"
-		);
-
-		if (returnPressed) {
+		// Quit
+		if (escapePressed) {
 			m_requestQuit = true;
 		}
-		if (escapePressed) {
-			m_flowState = FlowState::Playing;
-		}
+
 
 		dbg.playerPos = player.pos;
 		dbg.cameraPos = m_camera.Position();
@@ -285,10 +268,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	if (m_cfgPollTimer >= 1.0f) {
 		m_cfgPollTimer = 0.0f;
 		try {
-			auto t = std::filesystem::last_write_time(AssetPath("assets/config.json"));
+			auto t = std::filesystem::last_write_time("assets/config.json");
 			if (t != m_cfgTimestamp) {
 				m_cfgTimestamp = t;
-				ReloadConfig(AssetPath("assets/config.json").c_str());
+				ReloadConfig("assets/config.json");
 				std::printf("[HOTRELOAD] config.json reloaded\n");
 			}
 		}
@@ -300,7 +283,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	if (dbg.requestReloadConfig) {
 		dbg.requestReloadConfig = false;
-		ReloadConfig(AssetPath("assets/config.json").c_str());
+		ReloadConfig("assets/config.json");
 	}
 
 	// --------------------
@@ -316,7 +299,14 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 	prevTab = tabNow;
 
-	// Fullscreen hotkeys are handled in the platform event loop (SdlPlatform::Pump).
+	static bool prevF11 = false;
+	bool f11Now = input.Down(Key::F11);
+
+	if (f11Now && !prevF11) {
+		platform.ToggleFullscreen();
+	}
+
+	prevF11 = f11Now;
 
 	// --------------------
 	// PAUSE HANDLING
@@ -391,7 +381,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 			move.x *= invLen; move.y *= invLen;
 		}
 
-		// “desired” velocity from input
+		// ï¿½desiredï¿½ velocity from input
 		Vec2 desired = move * m_playerMoveSpeed;
 
 		// blend toward desired (keeps knockback snappy but controllable)
@@ -791,43 +781,32 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	else                         platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 40, 40, 40);
 
 	if (m_flowState == FlowState::QuitConfirm) {
-		int w = 0, h = 0;
-		platform.GetWindowSize(w, h);
-
-		// Dim background
-		platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
-
-		// Center box
-		const int bw = 560;
-		const int bh = 120;
-		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 40, 40, 40);
-
-		// Two hint bars (no text renderer yet)
-		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 20, 380, 24, 70, 70, 70);   // "Quit? Enter"
-		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 60, 380, 24, 70, 70, 70);   // "Esc to cancel"
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"QUIT?",
+			"ENTER: Quit",
+			"ESC: Back"
+		);
 		return;
-		}
-
-// --------------------
-	// Game Over overlay (no text renderer yet)
-	// --------------------
-	if (m_gameOver) {
-		int w = 0, h = 0;
-		platform.GetWindowSize(w, h);
-
-		// Dim background
-		platform.DrawFilledRect(0, 0, w, h, 20, 20, 20);
-
-		// Big red banner
-		const int bw = 520;
-		const int bh = 90;
-		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 180, 40, 40);
-
-		// "Press R" hint bar
-		const int hw = 320;
-		const int hh = 22;
-		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
 	}
+
+	if (m_flowState == FlowState::Win) {
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"YOU WIN!",
+			"ENTER: Next Level",
+			"ESC: Quit   R: Restart Level"
+		);
+		return;
+	}
+
+	if (m_flowState == FlowState::Lose) {
+		DrawCenteredOverlay(platform, m_assets.Font(),
+			"YOU LOSE!",
+			"R: Restart Level",
+			"ESC: Quit"
+		);
+		return;
+	}
+
 	if (m_gameWin) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
