@@ -52,7 +52,7 @@ void App::Run() {
         // ---- Fixed timestep update ----
         accumulator += frame.dtSeconds;
 
-        // Prevent spiral of death if the app hitches
+        // Prevent spiral of death if the app hitches.
         if (accumulator > 0.25f) accumulator = 0.25f;
 
         while (accumulator >= fixedDt) {
@@ -70,7 +70,7 @@ void App::Run() {
 
         debugUI.BeginFrame();
         debugUI.Draw(dbg);     // NEW
-        game.Render(g_platform, alpha, dbg); // we’ll pass dbg into Render
+        game.Render(g_platform, alpha, dbg); // well pass dbg into Render
         debugUI.EndFrame(g_platform);
 
 

@@ -70,7 +70,7 @@ private:
     // Fullscreen toggle state
     bool m_isFullscreen = false;
 
-    // Remember windowed placement so we can restore it after fullscreen
+    // Remember windowed placement so we can restore it after fullscreen.
     int m_windowedX = 0;
     int m_windowedY = 0;
     int m_windowedW = 1280;

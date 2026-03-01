@@ -29,7 +29,7 @@ bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
     // Start maximized (still windowed; respects taskbar, etc.).
     SDL_MaximizeWindow(m_window);
 
-    // Accelerated + vsync renderer (good default for a tiny engine).
+    // Accelerated + vsync renderer (good starting values for a tiny engine).
     m_renderer = SDL_CreateRenderer(m_window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 

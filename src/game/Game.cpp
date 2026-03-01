@@ -8,7 +8,7 @@
 #include <engine/Assets.h>
 #include "engine/Paths.h"
 // -----------------------------
-// Collision (circle vs circle)
+// Collision helpers (circle vs circle)
 // -----------------------------
 static bool CheckCollision(const Entity& a, const Entity& b) {
 	Vec2 d = a.pos - b.pos;
@@ -37,17 +37,17 @@ static void DrawCenteredOverlay(SdlPlatform& platform, const SdlTexture& font,
 	int w = 0, h = 0;
 	platform.GetWindowSize(w, h);
 
-	// background
+	// Background dimmer
 	platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
 
-	// panel
+	// Panel box
 	const int pw = 760;
 	const int ph = 240;
 	const int px = (w - pw) / 2;
 	const int py = (h - ph) / 2;
 	platform.DrawFilledRect(px, py, pw, ph, 30, 30, 30);
 
-	// text
+	// Overlay text
 	const int glyphW = 8, glyphH = 8, cols = 16, scale = 3;
 
 	int tx = px + 24;
@@ -62,7 +62,7 @@ static void DrawCenteredOverlay(SdlPlatform& platform, const SdlTexture& font,
 }
 
 // -----------------------------
-// ECS-lite: entity creation
+// ECS-lite: spawn helpers
 // -----------------------------
 Entity& Game::CreateEntity(EntityType type, Vec2 pos, float radius) {
 	Entity e{};
@@ -78,30 +78,30 @@ Entity& Game::CreateEntity(EntityType type, Vec2 pos, float radius) {
 }
 
 bool Game::Init(SdlPlatform& platform) {
-	// Assets must init first or sprites won't render
+	// Load assets first—no assets means no sprites.
 	if (!m_assets.Init(platform))
 		return false;
 
 	m_map.LoadCSV("assets/maps/level01.csv");
 
-	// Load config (speeds, world size, etc.)
+	// Load config (speeds, world size, spawns, etc.).
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
 
-	// Camera defaults
+	// Camera starting values
 	m_camera.SetZoom(1.0f);
 	m_camera.SetShakeOffset({ 0.0f, 0.0f });
 
-	// Hot-reload timestamp init
+	// Set up config.json hot-reload timestamp
 	try {
 		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
 	}
 	catch (...) {}
 	m_cfgPollTimer = 0.0f;
 
-	// Build entities (player/enemies/pickups) from the CSV markers
+	// Spawn player/enemies/pickups from the CSV markers.
 	RestartGame();
 
-	// Center camera on player after spawn
+	// Center camera on the player after spawn.
 	int winW = 0, winH = 0;
 	platform.GetWindowSize(winW, winH);
 	const Entity& player = m_entities[m_playerIndex];
@@ -111,7 +111,7 @@ bool Game::Init(SdlPlatform& platform) {
 }
 
 void Game::ClampPlayerToWorld(Entity& player) const {
-	// Keep the entire sprite inside world bounds by clamping using half extents.
+	// Keep the whole sprite inside the world bounds (clamp using half extents).
 	const auto& tex = m_assets.Player();
 	const float halfW = tex.Width() * 0.5f;
 	const float halfH = tex.Height() * 0.5f;
@@ -127,27 +127,27 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 	int winW = 0, winH = 0;
 	platform.GetWindowSize(winW, winH);
 
-	// World size in pixels (or world units that match your render units)
+	// World size in pixels (or world units that match your render units).
 	const float worldW = m_map.Width() * (float)m_map.TileSize();
 	const float worldH = m_map.Height() * (float)m_map.TileSize();
 
 	// Desired camera position: center player
 	Vec2 camPos = player.pos - Vec2{ winW * 0.5f, winH * 0.5f };
 
-	// Compute max scroll range (never negative)
+	// Compute max scroll range (never negative).
 	const float maxX = std::max(0.0f, worldW - (float)winW);
 	const float maxY = std::max(0.0f, worldH - (float)winH);
 
 	if (maxX <= 0.0f) {
-		// World narrower than screen -> center world horizontally
-		camPos.x = (worldW - (float)winW) * 0.5f; // negative is OK here; it centers
+		// World narrower than screen -> center world horizontally.
+		camPos.x = (worldW - (float)winW) * 0.5f; // negative is OK here; it centers.
 	}
 	else {
 		camPos.x = std::clamp(camPos.x, 0.0f, maxX);
 	}
 
 	if (maxY <= 0.0f) {
-		// World shorter than screen -> center world vertically
+		// World shorter than screen -> center world vertically.
 		camPos.y = (worldH - (float)winH) * 0.5f;
 	}
 	else {
@@ -197,7 +197,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	bool escapePressed = escapeNow && !prevEscape;
 	prevEscape = escapeNow;
 
-	// Keep legacy flags in sync for any old render paths
+	// Keep legacy flags in sync for any old render paths.
 	m_gameWin = (m_flowState == FlowState::Win);
 	m_gameOver = (m_flowState == FlowState::Lose);
 
@@ -205,7 +205,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// FLOW STATE HANDLING
 	// --------------------
 	if (m_flowState == FlowState::Win) {
-// Advance ONLY on key press (NOT every frame)
+// Advance ONLY on key press (NOT every frame).
 		if (returnPressed) {
 			// Next level (wrap or clamp)
 			m_currentLevel++;
@@ -228,7 +228,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		}
 
 
-		// Update debug info and stop simulation while in win screen
+		// Update debug info and stop simulation while in win screen.
 		dbg.playerPos = player.pos;
 		dbg.cameraPos = m_camera.Position();
 		return;
@@ -262,7 +262,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     }
 
 	// --------------------
-	// HOT-RELOAD POLLING (runs even if paused)
+	// hot-reload POLLING (runs even if paused).
 	// --------------------
 	m_cfgPollTimer += fixedDt;
 	if (m_cfgPollTimer >= 1.0f) {
@@ -287,12 +287,12 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 	// --------------------
-	// Toggle debug UI with Tab (edge-triggered)
+	// Toggle debug UI with Tab (edge-triggered).
 	// --------------------
 	static bool prevTab = false;
 	bool tabNow = input.Down(Key::Tab);
 	if (tabNow && !prevTab) {
-		// If you keep imguiWantsKeyboard, this prevents fighting ImGui focus
+		// If you keep imguiWantsKeyboard, this prevents fighting ImGui focus.
 		if (!dbg.imguiWantsKeyboard) {
 			dbg.showUI = !dbg.showUI;
 		}
@@ -333,7 +333,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	m_invulnSeconds = dbg.invulnSeconds;
 	m_hitKnockback = dbg.hitKnockback;
 
-	// Keep player state sane if tuning changed at runtime
+	// Keep player state sane if tuning changed at runtime.
 	if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
 	player.invulnDuration = m_invulnSeconds;
 
@@ -384,7 +384,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		// �desired� velocity from input
 		Vec2 desired = move * m_playerMoveSpeed;
 
-		// blend toward desired (keeps knockback snappy but controllable)
+		// blend toward desired (keeps knockback snappy but controllable).
 		const float accel = 18.0f;
 		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
 	}
@@ -476,7 +476,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 				}
 			}
 
-			// Wall collision (keep from sliding through)
+			// Wall collision (keep from sliding through).
 			m_map.ResolveCircleCollision(e.pos, e.radius);
 		}
 
@@ -539,7 +539,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 				
 			}
 
-			// Keep player valid after collision pushes
+			// Keep player valid after collision pushes.
 			ClampPlayerToWorld(player);
 			m_map.ResolveCircleCollision(player.pos, player.radius);
 		}
@@ -577,7 +577,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 			m_speedBuffTimer = m_speedBuffDuration;
 			break;
 		case PickupKind::Shield:
-			// One-hit protection (timer also useful for UI)
+			// One-hit protection (timer also useful for UI).
 			m_shieldTimer = m_shieldDuration;
 			break;
 		default:
@@ -727,7 +727,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 			const int size = (int)(e.radius * 2.0f);
 			const int drawX = (int)(screenPos.x - size * 0.5f);
 			const int drawY = (int)(screenPos.y - size * 0.5f);
-			int r = 200, g = 80, b = 80; // chaser default
+			int r = 200, g = 80, b = 80; // chaser starting values
 			switch (e.enemyKind) {
 			case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
 			case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
@@ -771,7 +771,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		}
 	}
 
-	// Buff indicators (same size as hearts/tokens)
+	// Buff indicators (same size as hearts/tokens).
 	const int buffY = tokenY + tokenStep;
 	// Speed
 	if (m_speedBuffTimer > 0.0f) platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 80, 160, 255);
@@ -793,7 +793,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		DrawCenteredOverlay(platform, m_assets.Font(),
 			"YOU WIN!",
 			"ENTER: Next Level",
-			"ESC: Quit   R: Restart Level"
+			"ESC: Quit"
 		);
 		return;
 	}
@@ -811,7 +811,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
 
-		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha
+		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha.
 		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
 	}
 
@@ -854,7 +854,7 @@ void Game::RespawnEnemiesFromConfig() {
 	// Preserve current player state (pos/prevPos/id/etc.)
 	Entity preservedPlayer = m_entities[m_playerIndex];
 
-	// Rebuild entity list: player first, then enemies
+	// Rebuild entity list: player first, then enemies.
 	m_entities.clear();
 	m_entities.push_back(preservedPlayer);
 	m_playerIndex = 0;
@@ -910,10 +910,10 @@ void Game::RestartGame() {
 	player.pos = playerSpawn;
 	player.prevPos = player.pos;
 
-	// 3) Spawn pickups from map (multiple tile IDs)
-	//    2 = Token (counts toward win)
+	// 3) Spawn pickups from map (multiple tile IDs).
+	// 2 = Token (counts toward win).
 	//    5 = Health (+1 heart)
-	//    6 = Speed (temporary speed boost)
+	// 6 = Speed (temporary speed boost).
 	//    7 = Shield (one-hit protection)
 	constexpr int kTileToken  = 2;
 	constexpr int kTileHealth = 5;
@@ -972,7 +972,7 @@ void Game::SpawnPickupAt(const Vec2& worldPos, PickupKind kind)
     p.active = true;
     p.pickupKind = kind;
 
-    // Optional per-kind value (only Token contributes to win/score)
+    // Optional per-kind value (only Token contributes to win/score).
     if (kind == PickupKind::Token) {
         p.value = 1;
     } else {

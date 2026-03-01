@@ -26,7 +26,7 @@ struct DebugState {
     int playerHealth = 3;
     bool gameOver = false;
 
-    // UI capture flags (set by DebugUI each frame)
+    // UI capture flags (set by DebugUI each frame).
     bool imguiWantsKeyboard = false;
     bool imguiWantsMouse = false;
 

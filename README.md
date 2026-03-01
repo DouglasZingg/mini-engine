@@ -12,3 +12,6 @@
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="C:/Users/dougl/vcpkg/scripts/buildsystems/vcpkg.cmake"
 cmake --build build --config Debug
 build\Debug\mini_engine.exe
+
+
+cmake --build build --config Release  
