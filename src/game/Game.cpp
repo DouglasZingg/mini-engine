@@ -84,6 +84,10 @@ bool Game::Init(SdlPlatform& platform) {
 
 	m_map.LoadCSV("assets/maps/level01.csv");
 
+	m_worldSize = {
+	m_map.Width() * (float)m_map.TileSize(),
+	m_map.Height() * (float)m_map.TileSize()
+	};
 	// Load config (speeds, world size, spawns, etc.).
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
 
@@ -205,7 +209,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// FLOW STATE HANDLING
 	// --------------------
 	if (m_flowState == FlowState::Win) {
-// Advance ONLY on key press (NOT every frame).
+		// Advance ONLY on key press (NOT every frame).
 		if (returnPressed) {
 			// Next level (wrap or clamp)
 			m_currentLevel++;
@@ -214,6 +218,11 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 			char mapPath[64];
 			std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
 			m_map.LoadCSV(mapPath);
+
+			m_worldSize = {
+				m_map.Width() * (float)m_map.TileSize(),
+				m_map.Height() * (float)m_map.TileSize()
+			};
 
 			RestartGame();                 // rebuilds entities from CSV markers
 			m_flowState = FlowState::Playing;
@@ -235,7 +244,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	}
 
 	if (m_flowState == FlowState::Lose) {
-// Restart ONLY on key press
+		// Restart ONLY on key press
 		if (rPressed) {
 			RestartGame();
 			m_flowState = FlowState::Playing;
@@ -253,13 +262,13 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 
 	if (escapePressed) {
-        // Pause/quit confirmation overlay (polish)
-        m_flowState = FlowState::QuitConfirm;
-        // keep debug info updated
-        dbg.playerPos = player.pos;
-        dbg.cameraPos = m_camera.Position();
-        return;
-    }
+		// Pause/quit confirmation overlay (polish)
+		m_flowState = FlowState::QuitConfirm;
+		// keep debug info updated
+		dbg.playerPos = player.pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
 
 	// --------------------
 	// hot-reload POLLING (runs even if paused).
@@ -350,7 +359,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	m_camera.SetZoom(dbg.zoom);
 
 	// --------------------
-	
+
 	// --------------------
 	// Power-up timers
 	// --------------------
@@ -363,8 +372,8 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
 	}
 
-// INPUT SYSTEM (player)
-	// --------------------
+	// INPUT SYSTEM (player)
+		// --------------------
 	player.prevPos = player.pos;
 
 	if (player.hitstun <= 0.0f) {
@@ -518,7 +527,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 			// DAMAGE (only if not invulnerable)
 			if (player.invulnTimer <= 0.0f) {
-				player.health -= 1;
+				if (e.enemyKind == EnemyKind::Tank) // hit feedback: turn enemy red (chaser color)
+					player.health -= 2;
+				else
+					player.health -= 1;
 				player.invulnTimer = m_iframesSeconds;
 				player.hitstun = m_hitstunSeconds;
 
@@ -536,7 +548,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 				m_shakeDuration = 0.20f;
 				m_shakeTime = m_shakeDuration;
 				m_shakeStrength = dbg.shakeStrength;
-				
+
 			}
 
 			// Keep player valid after collision pushes.
@@ -585,7 +597,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 		}
 	}
 
-if (player.health <= 0) {
+	if (player.health <= 0) {
 		m_flowState = FlowState::Lose;
 	}
 
@@ -709,9 +721,9 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 			// Color by pickup kind
 			switch (e.pickupKind) {
 			case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break; // yellow
-			case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 220, 80); break; // green
-			case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 160, 255); break; // blue
-			case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180,  80, 220); break; // purple
+			case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 220, 80); break; // green
+			case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 160, 255); break; // blue
+			case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180, 80, 220); break; // purple
 			default:                platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
 			}
 		}
@@ -766,7 +778,8 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	for (int i = 0; i < totalTokens; ++i) {
 		if (i < collected) {
 			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
-		} else {
+		}
+		else {
 			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 60, 60, 60);
 		}
 	}
@@ -915,9 +928,9 @@ void Game::RestartGame() {
 	//    5 = Health (+1 heart)
 	// 6 = Speed (temporary speed boost).
 	//    7 = Shield (one-hit protection)
-	constexpr int kTileToken  = 2;
+	constexpr int kTileToken = 2;
 	constexpr int kTileHealth = 5;
-	constexpr int kTileSpeed  = 6;
+	constexpr int kTileSpeed = 6;
 	constexpr int kTileShield = 7;
 
 	m_pickupsRemaining = 0;
@@ -968,15 +981,16 @@ void Game::RestartGame() {
 
 void Game::SpawnPickupAt(const Vec2& worldPos, PickupKind kind)
 {
-    Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);
-    p.active = true;
-    p.pickupKind = kind;
+	Entity& p = CreateEntity(EntityType::Pickup, worldPos, 12.0f);
+	p.active = true;
+	p.pickupKind = kind;
 
-    // Optional per-kind value (only Token contributes to win/score).
-    if (kind == PickupKind::Token) {
-        p.value = 1;
-    } else {
-        p.value = 0;
-    }
+	// Optional per-kind value (only Token contributes to win/score).
+	if (kind == PickupKind::Token) {
+		p.value = 1;
+	}
+	else {
+		p.value = 0;
+	}
 }
 
