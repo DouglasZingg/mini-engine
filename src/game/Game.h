@@ -9,6 +9,7 @@
 #include "game/Tilemap.h"
 #include <filesystem>
 #include <vector>
+#include <string>
 using EntityId = uint32_t;
 class SdlPlatform;
 
@@ -29,6 +30,8 @@ public:
 private:
     void ClampPlayerToWorld(Entity& player) const;
     void UpdateCameraFollow(SdlPlatform& platform, const Entity& player);
+    void UpdateWorldSizeFromMap();
+    void ValidateAndSanitizeMap();
     void DrawWorldGrid(SdlPlatform& platform) const;
     void RestartGame();
 
@@ -38,6 +41,8 @@ private:
     Camera2D   m_camera;
 
     Vec2  m_worldSize{ 2000.0f, 2000.0f };
+    std::string m_levelValidationMsg; // set after map load (shown on title + debug)
+
     float m_playerSpeed = 220.0f; // pixels/sec for now
 
     // Combat tuning (driven by DebugState)
@@ -92,8 +97,15 @@ private:
 
     bool m_requestQuit = false;
     
-    enum class FlowState { Title, Playing, Paused, Win, Lose, QuitConfirm };
+    enum class FlowState { Title, Controls, Playing, Paused, Win, Lose, QuitConfirm };
     FlowState m_flowState = FlowState::Title;
+
+    // simple menu cursors
+    int m_titleMenuIndex = 0;
+    int m_pauseMenuIndex = 0;
+    int m_quitMenuIndex = 0;
+    FlowState m_quitReturnState = FlowState::Paused;
+
 
     // player
     float m_playerMoveSpeed = 260.0f;

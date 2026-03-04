@@ -60,6 +60,9 @@ void SdlPlatform::Shutdown() {
 }
 
 bool SdlPlatform::Pump(SdlFrameData& outFrame) {
+    // Keep input history inside the platform so Pressed/Released works even though App creates SdlFrameData each loop.
+    m_input.BeginFrame();
+
     // ---- Timing ----
     const std::uint64_t now = static_cast<std::uint64_t>(SDL_GetPerformanceCounter());
     const std::uint64_t delta = now - m_prevCounter;
@@ -83,54 +86,39 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
         if (e.type == SDL_QUIT) {
             return false;
         }
-        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
-            return false;
+
+        // Fullscreen toggles belong here so they react to actual key-down events (not held state).
+        if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
+            const SDL_Keycode key = e.key.keysym.sym;
+            const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
+
+            if (key == SDLK_F11) {
+                ToggleFullscreen();
+            }
+            else if (key == SDLK_RETURN && (mod & KMOD_ALT)) {
+                ToggleFullscreen();
+            }
         }
+
         if (m_eventCb) {
             m_eventCb(m_eventUser, &e);
         }
     }
 
-    if (e.type == SDL_KEYDOWN && e.key.repeat == 0)
-    {
-        const SDL_Keycode key = e.key.keysym.sym;
-        const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
-
-        if (key == SDLK_F11)
-        {
-            ToggleFullscreen();
-        }
-        else if (key == SDLK_RETURN && (mod & KMOD_ALT))
-        {
-            ToggleFullscreen();
-        }
-    }
-
     // ---- Input snapshot ----
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    outFrame.input.SetKey(Key::W, keys[SDL_SCANCODE_W] != 0);
-    outFrame.input.SetKey(Key::A, keys[SDL_SCANCODE_A] != 0);
-    outFrame.input.SetKey(Key::S, keys[SDL_SCANCODE_S] != 0);
-    outFrame.input.SetKey(Key::D, keys[SDL_SCANCODE_D] != 0);
-    outFrame.input.SetKey(Key::Escape, keys[SDL_SCANCODE_ESCAPE] != 0);
-    outFrame.input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
-    outFrame.input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
-    outFrame.input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
-    outFrame.input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
+    m_input.SetKey(Key::W, keys[SDL_SCANCODE_W] != 0);
+    m_input.SetKey(Key::A, keys[SDL_SCANCODE_A] != 0);
+    m_input.SetKey(Key::S, keys[SDL_SCANCODE_S] != 0);
+    m_input.SetKey(Key::D, keys[SDL_SCANCODE_D] != 0);
+    m_input.SetKey(Key::Escape, keys[SDL_SCANCODE_ESCAPE] != 0);
+    m_input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
+    m_input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
+    m_input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
+    m_input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
 
-
-    // Occasional logging for sanity (once per second).
-    static float logTimer = 0.0f;
-    logTimer += dt;
-    if (logTimer >= 1.0f) {
-        logTimer = 0.0f;
-        std::printf("[INFO] dt=%.4f t=%.2f WASD=%d%d%d%d\n",
-            outFrame.dtSeconds, outFrame.timeSeconds,
-            (int)outFrame.input.Down(Key::W),
-            (int)outFrame.input.Down(Key::A),
-            (int)outFrame.input.Down(Key::S),
-            (int)outFrame.input.Down(Key::D));
-    }
+    // Output a copy for this frame.
+    outFrame.input = m_input;
 
     return true;
 }

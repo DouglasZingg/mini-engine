@@ -61,6 +61,56 @@ static void DrawCenteredOverlay(SdlPlatform& platform, const SdlTexture& font,
 	platform.DrawTextBMP(font, tx, ty, bodyB, glyphW, glyphH, cols, 32, 2);
 }
 
+
+static void DrawMenuOverlay(SdlPlatform& platform, const SdlTexture& font,
+    const char* title,
+    const char* const* items, int itemCount, int selectedIndex,
+    const char* footerA = nullptr, const char* footerB = nullptr)
+{
+    int w = 0, h = 0;
+    platform.GetWindowSize(w, h);
+
+    // background
+    platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
+
+    // panel (a bit taller than the generic overlay)
+    const int pw = 760;
+    const int ph = 360;
+    const int px = (w - pw) / 2;
+    const int py = (h - ph) / 2;
+    platform.DrawFilledRect(px, py, pw, ph, 30, 30, 30);
+
+    const int glyphW = 8, glyphH = 8, cols = 16;
+
+    int tx = px + 24;
+    int ty = py + 24;
+
+    // title
+    platform.DrawTextBMP(font, tx, ty, title, glyphW, glyphH, cols, 32, 3);
+
+    // items
+    ty += glyphH * 3 * 2;
+    for (int i = 0; i < itemCount; ++i) {
+        char line[128];
+        if (i == selectedIndex) {
+            std::snprintf(line, sizeof(line), "> %s", items[i]);
+        } else {
+            std::snprintf(line, sizeof(line), "  %s", items[i]);
+        }
+        platform.DrawTextBMP(font, tx, ty, line, glyphW, glyphH, cols, 32, 2);
+        ty += glyphH * 2 * 2;
+    }
+
+    // footer hints
+    if (footerA) {
+        ty = py + ph - 72;
+        platform.DrawTextBMP(font, tx, ty, footerA, glyphW, glyphH, cols, 32, 2);
+        if (footerB) {
+            ty += glyphH * 2 * 2;
+            platform.DrawTextBMP(font, tx, ty, footerB, glyphW, glyphH, cols, 32, 2);
+        }
+    }
+}
 // -----------------------------
 // ECS-lite: entity creation
 // -----------------------------
@@ -83,6 +133,8 @@ bool Game::Init(SdlPlatform& platform) {
 		return false;
 
 	m_map.LoadCSV("assets/maps/level01.csv");
+	ValidateAndSanitizeMap();
+	UpdateWorldSizeFromMap();
 
 	// Load config (speeds, world size, etc.)
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
@@ -100,9 +152,6 @@ bool Game::Init(SdlPlatform& platform) {
 
 	// Build entities (player/enemies/pickups) from the CSV markers
 	RestartGame();
-
-	// Start at Title screen (don't simulate until player presses Enter)
-	m_flowState = FlowState::Title;
 
 	// Center camera on player after spawn
 	int winW = 0, winH = 0;
@@ -183,24 +232,16 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 // AUTHORITATIVE FLOW INPUT (edge-triggered)
 // --------------------
-	static bool prevReturn = false;
-	static bool prevR = false;
-
-	const bool returnNow = input.Down(Key::Return);
-	const bool rNow = input.Down(Key::R);
-
-	const bool returnPressed = (returnNow && !prevReturn);
-	const bool rPressed = (rNow && !prevR);
-
-	prevReturn = returnNow;
-	prevR = rNow;
-
-	static bool prevEscape = false;
-	bool escapeNow = input.Down(Key::Escape);
-	bool escapePressed = escapeNow && !prevEscape;
-	prevEscape = escapeNow;
-
-	// Keep legacy flags in sync for any old render paths
+// All flow/menu screens use action presses (not held) so a key doesn't repeat every tick.
+const bool upPressed      = input.Pressed(Action::Up);
+const bool downPressed    = input.Pressed(Action::Down);
+const bool leftPressed    = input.Pressed(Action::Left);
+const bool rightPressed   = input.Pressed(Action::Right);
+const bool confirmPressed = input.Pressed(Action::Confirm);
+const bool cancelPressed  = input.Pressed(Action::Cancel);
+const bool restartPressed = input.Pressed(Action::Restart);
+const bool debugPressed   = input.Pressed(Action::ToggleDebug);
+// Keep legacy flags in sync for any old render paths
 	m_gameWin = (m_flowState == FlowState::Win);
 	m_gameOver = (m_flowState == FlowState::Lose);
 
@@ -209,92 +250,145 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	// Update() owns state transitions only. Render() owns drawing for these screens.
 	if (m_flowState == FlowState::Title) {
-		// Title: Enter starts, Esc quits
-		if (returnPressed) {
-			m_flowState = FlowState::Playing;
-		}
-		if (escapePressed) {
-			m_requestQuit = true;
-		}
-		// No simulation while on title
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
+        // ---- Title Menu ----
+        const int itemCount = 3; // Start / Controls / Quit
 
-	if (m_flowState == FlowState::Paused) {
-		// Pause: Esc resumes, Enter opens quit confirm, R restarts
-		if (escapePressed) {
-			m_flowState = FlowState::Playing;
-		}
-		if (returnPressed) {
-			m_flowState = FlowState::QuitConfirm;
-		}
-		if (rPressed) {
-			RestartGame();
-			m_flowState = FlowState::Playing;
-		}
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
+        if (upPressed)   m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount;
+        if (downPressed) m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount;
 
-	if (m_flowState == FlowState::QuitConfirm) {
-		// Quit confirm: Enter quits, Esc goes back to pause
-		if (returnPressed) {
-			m_requestQuit = true;
-		}
-		if (escapePressed) {
-			m_flowState = FlowState::Paused;
-		}
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
+        if (confirmPressed) {
+            if (m_titleMenuIndex == 0) {          // Start
+                m_flowState = FlowState::Playing;
+            } else if (m_titleMenuIndex == 1) {   // Controls
+                m_flowState = FlowState::Controls;
+            } else {                               // Quit
+                m_requestQuit = true;
+            }
+        }
 
-	if (m_flowState == FlowState::Win) {
-		// Win: Enter next level, R restarts, Esc quits
-		if (returnPressed) {
-			m_currentLevel++;
-			if (m_currentLevel > 10) m_currentLevel = 1;
+        if (cancelPressed) {
+            m_requestQuit = true;
+        }
 
-			char mapPath[64];
-			std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
-			m_map.LoadCSV(mapPath);
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
 
-			RestartGame();
-			m_flowState = FlowState::Playing;
-		}
-		if (rPressed) {
-			RestartGame();
-			m_flowState = FlowState::Playing;
-		}
-		if (escapePressed) {
-			m_requestQuit = true;
-		}
+    if (m_flowState == FlowState::Controls) {
+        // Any confirm/cancel goes back to title.
+        if (confirmPressed || cancelPressed) {
+            m_flowState = FlowState::Title;
+        }
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
 
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
+    if (m_flowState == FlowState::Paused) {
+        // ---- Pause Menu ----
+        const int itemCount = 4; // Resume / Restart / Quit to Title / Quit Game
+
+        if (upPressed)   m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount;
+        if (downPressed) m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount;
+
+        if (confirmPressed) {
+            if (m_pauseMenuIndex == 0) {          // Resume
+                m_flowState = FlowState::Playing;
+            } else if (m_pauseMenuIndex == 1) {   // Restart
+                RestartGame();
+                m_flowState = FlowState::Playing;
+            } else if (m_pauseMenuIndex == 2) {   // Quit to Title
+                RestartGame(); // reset the world so Title is clean next time
+                m_flowState = FlowState::Title;
+            } else {                               // Quit Game
+                m_quitMenuIndex = 0;               // default to "No"
+                m_quitReturnState = FlowState::Paused;
+                m_flowState = FlowState::QuitConfirm;
+            }
+        }
+
+        if (cancelPressed) {
+            m_flowState = FlowState::Playing;
+        }
+
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+
+    if (m_flowState == FlowState::QuitConfirm) {
+        // ---- Quit Confirm ----
+        const int itemCount = 2; // No / Yes
+
+        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % itemCount;
+
+        if (confirmPressed) {
+            if (m_quitMenuIndex == 0) {           // No
+                m_flowState = m_quitReturnState;
+            } else {                               // Yes
+                m_requestQuit = true;
+            }
+        }
+
+        if (cancelPressed) {
+            m_flowState = m_quitReturnState;
+        }
+
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+if (m_flowState == FlowState::Win) {
+        // Win: Confirm goes next level, Restart restarts, Cancel quits
+        if (confirmPressed) {
+            m_currentLevel++;
+            if (m_currentLevel > 10) m_currentLevel = 1;
+
+            char mapPath[64];
+            std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
+            m_map.LoadCSV(mapPath);
+            ValidateAndSanitizeMap();
+            UpdateWorldSizeFromMap();
+
+            RestartGame();
+            m_flowState = FlowState::Playing;
+        }
+
+        if (restartPressed) {
+            RestartGame();
+            m_flowState = FlowState::Playing;
+        }
+
+        if (cancelPressed) {
+            m_requestQuit = true;
+        }
+
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+
 
 	if (m_flowState == FlowState::Lose) {
-		// Lose: R restarts, Esc quits
-		if (rPressed) {
-			RestartGame();
-			m_flowState = FlowState::Playing;
-		}
-		if (escapePressed) {
-			m_requestQuit = true;
-		}
+        // Lose: Restart restarts, Cancel quits, Confirm also restarts (feels nice for controllers later)
+        if (confirmPressed || restartPressed) {
+            RestartGame();
+            m_flowState = FlowState::Playing;
+        }
 
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
+        if (cancelPressed) {
+            m_requestQuit = true;
+        }
+
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+
 
 	// Playing: Esc pauses
-	if (escapePressed) {
+	if (cancelPressed) {
 		m_flowState = FlowState::Paused;
 		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
 		dbg.cameraPos = m_camera.Position();
@@ -328,24 +422,13 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 	// --------------------
 	// Toggle debug UI with Tab (edge-triggered)
 	// --------------------
-	static bool prevTab = false;
-	bool tabNow = input.Down(Key::Tab);
-	if (tabNow && !prevTab) {
-		// If you keep imguiWantsKeyboard, this prevents fighting ImGui focus
+	// Toggle debug UI (Tab) - action based so it only flips once per press.
+	if (debugPressed) {
 		if (!dbg.imguiWantsKeyboard) {
 			dbg.showUI = !dbg.showUI;
 		}
 	}
-	prevTab = tabNow;
 
-	static bool prevF11 = false;
-	bool f11Now = input.Down(Key::F11);
-
-	if (f11Now && !prevF11) {
-		platform.ToggleFullscreen();
-	}
-
-	prevF11 = f11Now;
 
 	// --------------------
 	// PAUSE HANDLING
@@ -408,10 +491,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
 	if (player.hitstun <= 0.0f) {
 		Vec2 move{ 0,0 };
-		if (input.Down(Key::W)) move.y -= 1.0f;
-		if (input.Down(Key::S)) move.y += 1.0f;
-		if (input.Down(Key::A)) move.x -= 1.0f;
-		if (input.Down(Key::D)) move.x += 1.0f;
+		if (input.Down(Action::Up)) move.y -= 1.0f;
+		if (input.Down(Action::Down)) move.y += 1.0f;
+		if (input.Down(Action::Left)) move.x -= 1.0f;
+		if (input.Down(Action::Right)) move.x += 1.0f;
 
 		// normalize if moving diagonally
 		float lenSq = move.x * move.x + move.y * move.y;
@@ -711,48 +794,67 @@ void Game::DrawWorldGrid(SdlPlatform& platform) const {
 void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 	// Render() owns drawing for flow screens. Update() owns state transitions.
 	if (m_flowState == FlowState::Title) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"MINI ENGINE",
-			"ENTER: Start",
-			"ESC: Quit"
-		);
-		return;
-	}
-	if (m_flowState == FlowState::Paused) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"PAUSED",
-			"ESC: Resume   R: Restart",
-			"ENTER: Quit"
-		);
-		return;
-	}
-	if (m_flowState == FlowState::QuitConfirm) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"QUIT?",
-			"ENTER: Quit",
-			"ESC: Back"
-		);
-		return;
-	}
-	if (m_flowState == FlowState::Win) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU WIN!",
-			"ENTER: Next Level",
-			"ESC: Quit   R: Restart Level"
-		);
-		return;
-	}
-	if (m_flowState == FlowState::Lose) {
-		DrawCenteredOverlay(platform, m_assets.Font(),
-			"YOU LOSE!",
-			"R: Restart Level",
-			"ESC: Quit"
-		);
-		return;
-	}
+        const char* items[] = { "START", "CONTROLS", "QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "MINI ENGINE",
+            items, 3, m_titleMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Quit"
+        );
+        return;
+    }
 
+    if (m_flowState == FlowState::Controls) {
+        // Simple controls page (keep it readable, no fancy layout yet)
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "CONTROLS",
+            "WASD: Move   TAB: Debug UI",
+            "ENTER/ESC: Back"
+        );
+        return;
+    }
 
-	if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
+    if (m_flowState == FlowState::Paused) {
+        const char* items[] = { "RESUME", "RESTART LEVEL", "QUIT TO TITLE", "QUIT GAME" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "PAUSED",
+            items, 4, m_pauseMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Resume"
+        );
+        return;
+    }
+
+    if (m_flowState == FlowState::QuitConfirm) {
+        const char* items[] = { "NO", "YES - QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "QUIT GAME?",
+            items, 2, m_quitMenuIndex,
+            "W/S: Change   ENTER: Select",
+            "ESC: Back"
+        );
+        return;
+    }
+
+    if (m_flowState == FlowState::Win) {
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU WIN!",
+            "ENTER: Next Level",
+            "ESC: Quit   R: Restart Level"
+        );
+        return;
+    }
+
+    if (m_flowState == FlowState::Lose) {
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU LOSE!",
+            "ENTER/R: Restart Level",
+            "ESC: Quit"
+        );
+        return;
+    }
+
+if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 		return;
 
 	if (m_requestQuit)
@@ -908,6 +1010,11 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
 	}
 
+
+	// If the map had issues, show a small hint so you notice immediately.
+	if (!m_levelValidationMsg.empty()) {
+		platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
+	}
 }
 bool Game::ReloadConfig(const char* path) {
 	GameConfig newCfg = m_cfg;
@@ -933,7 +1040,11 @@ void Game::ApplyConfig(const GameConfig& cfg, bool respawnEnemies) {
 
 	m_playerSpeed = m_cfg.playerSpeed;
 	m_enemySpeed = m_cfg.enemySpeed;
-	m_worldSize = { m_cfg.worldWidth, m_cfg.worldHeight };
+	// World size comes from the map so bigger/smaller CSVs "just work".
+	// Config values are treated as a fallback only (used before a map is loaded).
+	if (m_map.Width() <= 0 || m_map.Height() <= 0) {
+		m_worldSize = { m_cfg.worldWidth, m_cfg.worldHeight };
+	}
 
 	if (respawnEnemies) {
 		RespawnEnemiesFromConfig();
@@ -956,6 +1067,72 @@ void Game::RespawnEnemiesFromConfig() {
 	for (const auto& sp : m_cfg.enemySpawns) {
 		CreateEntity(EntityType::Enemy, sp.pos, 18.0f);
 	}
+}
+
+
+void Game::UpdateWorldSizeFromMap()
+{
+    if (m_map.Width() <= 0 || m_map.Height() <= 0) return;
+    m_worldSize = {
+        m_map.Width() * (float)m_map.TileSize(),
+        m_map.Height() * (float)m_map.TileSize()
+    };
+}
+
+// Quick sanity checks so broken CSVs don't soft-lock you.
+// - Ensures tile values are in the known range (0..9)
+// - Ensures exactly one player tile (4). Extra spawns are cleared to floor.
+// - If no player tile exists, we keep config spawn fallback and warn.
+void Game::ValidateAndSanitizeMap()
+{
+    m_levelValidationMsg.clear();
+
+    if (m_map.Width() <= 0 || m_map.Height() <= 0) {
+        m_levelValidationMsg = "Map load failed (0x0). Check file path + CSV format.";
+        return;
+    }
+
+    int playerCount = 0;
+    bool hadBadTiles = false;
+    int badTileCount = 0;
+
+    for (int y = 0; y < m_map.Height(); ++y) {
+        for (int x = 0; x < m_map.Width(); ++x) {
+            const int v = m_map.At(x, y);
+
+            if (v == 4) playerCount++;
+
+            // Known tiles: 0..9 (based on your legend).
+            if (v < 0 || v > 9) {
+                hadBadTiles = true;
+                badTileCount++;
+                m_map.SetAt(x, y, 0);
+            }
+        }
+    }
+
+    if (playerCount == 0) {
+        m_levelValidationMsg = "No player spawn (4) in this map. Using config fallback spawn.";
+    }
+    else if (playerCount > 1) {
+        // Keep the first, clear the rest so restarts behave predictably.
+        bool keptOne = false;
+        for (int y = 0; y < m_map.Height(); ++y) {
+            for (int x = 0; x < m_map.Width(); ++x) {
+                if (m_map.At(x, y) == 4) {
+                    if (!keptOne) keptOne = true;
+                    else m_map.SetAt(x, y, 0);
+                }
+            }
+        }
+
+        m_levelValidationMsg = "Multiple player spawns (4) found. Keeping the first, clearing the rest.";
+    }
+
+    if (hadBadTiles) {
+        if (!m_levelValidationMsg.empty()) m_levelValidationMsg += "  ";
+        m_levelValidationMsg += "Found invalid tile values; replaced " + std::to_string(badTileCount) + " with floor (0).";
+    }
 }
 
 void Game::RestartGame() {

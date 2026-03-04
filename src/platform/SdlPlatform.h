@@ -67,6 +67,9 @@ private:
     SdlEventCallback m_eventCb = nullptr;
     void* m_eventUser = nullptr;
 
+    // Input is owned by the platform so Pressed/Released survives across frames.
+    Input m_input{};
+
     // Fullscreen toggle state
     bool m_isFullscreen = false;
 
