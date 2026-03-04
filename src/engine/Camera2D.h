@@ -12,7 +12,7 @@ public:
     void SetShakeOffset(const Vec2& s) { m_shake = s; }
     const Vec2& ShakeOffset() const { return m_shake; }
 
-    // Convert world position to screen position (pixels).
+    // Convert world position to screen position (pixels)
     Vec2 WorldToScreen(const Vec2& world) const {
         // World relative to camera origin
         Vec2 local = world - m_pos;
@@ -24,7 +24,7 @@ public:
         return local + m_shake;
     }
 
-    // Convert screen pixel position to world (useful later).
+    // Convert screen pixel position to world (useful later)
     Vec2 ScreenToWorld(const Vec2& screen) const {
         Vec2 unshaken = screen - m_shake;
         return (unshaken * (1.0f / m_zoom)) + m_pos;

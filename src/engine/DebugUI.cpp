@@ -3,7 +3,7 @@
 
 #include <imgui.h>
 
-// These Need to be included so the ImGui_ImplSDL2_* symbols are declared:.
+// These must be included so the ImGui_ImplSDL2_* symbols are declared:
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
 

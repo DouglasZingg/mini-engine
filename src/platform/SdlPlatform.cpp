@@ -29,7 +29,7 @@ bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
     // Start maximized (still windowed; respects taskbar, etc.).
     SDL_MaximizeWindow(m_window);
 
-    // Accelerated + vsync renderer (good starting values for a tiny engine).
+    // Accelerated + vsync renderer (good default for a tiny engine).
     m_renderer = SDL_CreateRenderer(m_window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
@@ -86,20 +86,6 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
             return false;
         }
-
-        // Fullscreen hotkeys (safe: handled per-event)
-        if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
-            const SDL_Keycode key = e.key.keysym.sym;
-            const SDL_Keymod   mod = (SDL_Keymod)e.key.keysym.mod;
-
-            if (key == SDLK_F11) {
-                ToggleFullscreen();
-            }
-            else if (key == SDLK_RETURN && (mod & KMOD_ALT)) {
-                ToggleFullscreen();
-            }
-        }
-
         if (m_eventCb) {
             m_eventCb(m_eventUser, &e);
         }

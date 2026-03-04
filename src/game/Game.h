@@ -92,8 +92,8 @@ private:
 
     bool m_requestQuit = false;
     
-    enum class FlowState { Playing, Win, Lose, QuitConfirm };
-    FlowState m_flowState = FlowState::Playing;
+    enum class FlowState { Title, Playing, Paused, Win, Lose, QuitConfirm };
+    FlowState m_flowState = FlowState::Title;
 
     // player
     float m_playerMoveSpeed = 260.0f;

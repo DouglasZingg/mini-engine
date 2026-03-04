@@ -68,7 +68,7 @@ void Tilemap::ResolveCircleCollision(Vec2& pos, float radius) const {
             float right = left + m_tileSize;
             float bottom = top + m_tileSize;
 
-            // Closest point on AABB to circle center.
+            // Closest point on AABB to circle center
             float cx = clampf(pos.x, left, right);
             float cy = clampf(pos.y, top, bottom);
 
@@ -89,7 +89,7 @@ void Tilemap::ResolveCircleCollision(Vec2& pos, float radius) const {
 }
 
 void Tilemap::Render(SdlPlatform& platform, const Camera2D& cam) const {
-    // Render solid tiles as filled rects. (Color params depend on your API).
+    // Render solid tiles as filled rects. (Color params depend on your API)
     // We only draw tiles in view, but simplest first: draw all.
     for (int y = 0; y < m_h; ++y) {
         for (int x = 0; x < m_w; ++x) {
