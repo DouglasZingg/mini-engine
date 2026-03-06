@@ -35,6 +35,11 @@ private:
     void DrawWorldGrid(SdlPlatform& platform) const;
     void RestartGame();
 
+    // HUD + quick feedback
+    void DrawHUD(SdlPlatform& platform) const;
+    void DrawToast(SdlPlatform& platform) const;
+    void DrawDamageFlash(SdlPlatform& platform) const;
+
 private:
     Assets     m_assets;
     GameConfig m_cfg;
@@ -60,6 +65,14 @@ private:
     float m_shakeTime = 0.0f;
     float m_shakeDuration = 0.0f;
     float m_shakeStrength = 0.0f;
+
+    // HUD / feedback (kept tiny on purpose)
+    std::string m_toastText;
+    float m_toastTimer = 0.0f;
+    float m_toastDuration = 1.0f;
+
+    float m_damageFlashTimer = 0.0f;
+    float m_damageFlashDuration = 0.18f;
 
     // Power-up timers
     float m_speedBuffTimer = 0.0f;

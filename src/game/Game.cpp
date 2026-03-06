@@ -485,6 +485,19 @@ if (m_flowState == FlowState::Win) {
 		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
 	}
 
+	// --------------------
+	// HUD feedback timers (toast + damage flash)
+	// --------------------
+	if (m_toastTimer > 0.0f) {
+		m_toastTimer -= fixedDt;
+		if (m_toastTimer < 0.0f) m_toastTimer = 0.0f;
+	}
+	if (m_damageFlashTimer > 0.0f) {
+		m_damageFlashTimer -= fixedDt;
+		if (m_damageFlashTimer < 0.0f) m_damageFlashTimer = 0.0f;
+	}
+
+
 // INPUT SYSTEM (player)
 	// --------------------
 	player.prevPos = player.pos;
@@ -641,6 +654,9 @@ if (m_flowState == FlowState::Win) {
 			// DAMAGE (only if not invulnerable)
 			if (player.invulnTimer <= 0.0f) {
 				player.health -= 1;
+				m_damageFlashTimer = m_damageFlashDuration;
+				m_toastText = "HIT!";
+				m_toastTimer = m_toastDuration;
 				player.invulnTimer = m_iframesSeconds;
 				player.hitstun = m_hitstunSeconds;
 
@@ -684,6 +700,8 @@ if (m_flowState == FlowState::Win) {
 		switch (e.pickupKind) {
 		case PickupKind::Token:
 			m_tokensCollected += 1;
+			m_toastText = "+TOKEN";
+			m_toastTimer = m_toastDuration;
 			if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
 			m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
 			if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
@@ -692,15 +710,25 @@ if (m_flowState == FlowState::Win) {
 			break;
 		case PickupKind::Health:
 			// +1 heart (clamped)
-			if (player.health < m_playerMaxHealth) player.health += 1;
+			if (player.health < m_playerMaxHealth) {
+				player.health += 1;
+				m_toastText = "+HEALTH";
+			} else {
+				m_toastText = "HEALTH FULL";
+			}
+			m_toastTimer = m_toastDuration;
 			break;
 		case PickupKind::Speed:
 			// Temporary movement boost
 			m_speedBuffTimer = m_speedBuffDuration;
+			m_toastText = "+SPEED";
+			m_toastTimer = m_toastDuration;
 			break;
 		case PickupKind::Shield:
 			// One-hit protection (timer also useful for UI)
 			m_shieldTimer = m_shieldDuration;
+			m_toastText = "+SHIELD";
+			m_toastTimer = m_toastDuration;
 			break;
 		default:
 			break;
@@ -1011,11 +1039,108 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 	}
 
 
+	// --------------------
+	// HUD + feedback (only during gameplay)
+	// --------------------
+	DrawHUD(platform);
+	DrawToast(platform);
+	DrawDamageFlash(platform);
+
+
 	// If the map had issues, show a small hint so you notice immediately.
 	if (!m_levelValidationMsg.empty()) {
 		platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
 	}
 }
+
+// --------------------
+// HUD + feedback
+// --------------------
+void Game::DrawHUD(SdlPlatform& platform) const
+{
+    const int glyphW = 8, glyphH = 8, cols = 16, scale = 2;
+
+    // Quick counts (only active enemies)
+    int enemyAlive = 0;
+    for (const Entity& e : m_entities) {
+        if (!e.active) continue;
+        if (e.type == EntityType::Enemy) enemyAlive++;
+    }
+
+    const Entity& player = m_entities[m_playerIndex];
+
+    char line[128]{};
+
+    int x = 16;
+    int y = 16;
+
+    std::snprintf(line, sizeof(line), "LEVEL: %d", m_currentLevel);
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+    y += glyphH * scale + 6;
+
+    std::snprintf(line, sizeof(line), "HP: %d/%d", player.health, m_playerMaxHealth);
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+    y += glyphH * scale + 6;
+
+    std::snprintf(line, sizeof(line), "TOKENS: %d/%d", m_tokensCollected, m_tokensTotal);
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+    y += glyphH * scale + 6;
+
+    std::snprintf(line, sizeof(line), "ENEMIES: %d", enemyAlive);
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+    y += glyphH * scale + 10;
+
+    // Buff status (keep it simple)
+    if (m_speedBuffTimer > 0.0f) {
+        std::snprintf(line, sizeof(line), "SPEED: %.1fs", m_speedBuffTimer);
+        platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+        y += glyphH * scale + 6;
+    }
+
+    if (m_shieldTimer > 0.0f) {
+        std::snprintf(line, sizeof(line), "SHIELD: %.1fs", m_shieldTimer);
+        platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+        y += glyphH * scale + 6;
+    }
+}
+
+void Game::DrawToast(SdlPlatform& platform) const
+{
+    if (m_toastTimer <= 0.0f || m_toastText.empty())
+        return;
+
+    const int glyphW = 8, glyphH = 8, cols = 16, scale = 2;
+
+    int w = 0, h = 0;
+    platform.GetWindowSize(w, h);
+
+    // Rough centering (monospace font)
+    const int charW = glyphW * scale;
+    const int textW = (int)m_toastText.size() * charW;
+
+    const int x = std::max(12, (w - textW) / 2);
+    const int y = h - (glyphH * scale) - 24;
+
+    platform.DrawTextBMP(m_assets.Font(), x, y, m_toastText.c_str(), glyphW, glyphH, cols, 32, scale);
+}
+
+void Game::DrawDamageFlash(SdlPlatform& platform) const
+{
+    if (m_damageFlashTimer <= 0.0f)
+        return;
+
+    int w = 0, h = 0;
+    platform.GetWindowSize(w, h);
+
+    // We don't have alpha in the current draw helper, so do a quick red border flash.
+    const int t = 14; // thickness
+    platform.DrawFilledRect(0, 0, w, t, 180, 40, 40);          // top
+    platform.DrawFilledRect(0, h - t, w, t, 180, 40, 40);      // bottom
+    platform.DrawFilledRect(0, 0, t, h, 180, 40, 40);          // left
+    platform.DrawFilledRect(w - t, 0, t, h, 180, 40, 40);      // right
+}
+
+
 bool Game::ReloadConfig(const char* path) {
 	GameConfig newCfg = m_cfg;
 	if (!LoadGameConfig(path, newCfg)) {
