@@ -130,4 +130,9 @@ private:
     // enemies
     float m_enemyKnockbackStrength = 450.0f;
     float m_enemyHitstunSeconds = 0.08f;
+
+    // AI polish
+    float m_enemyLeashMultiplier = 1.75f;   // drop aggro if the player gets far enough away
+    float m_enemyAvoidRadius = 52.0f;       // soft separation while moving so enemies do not stack as much
+    float m_enemyAvoidStrength = 0.65f;     // how much the avoidance vector bends movement
 };

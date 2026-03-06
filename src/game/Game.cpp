@@ -534,44 +534,62 @@ if (m_flowState == FlowState::Win) {
 	m_map.ResolveCircleCollision(player.pos, player.radius);
 
 	// --------------------
-	// AI SYSTEM (Idle -> Seek)
+	// AI SYSTEM (Idle -> Seek with leash / repath throttling / soft steering)
 	// --------------------
+
+	auto LengthSq = [](Vec2 v) {
+		return v.x * v.x + v.y * v.y;
+	};
 
 	for (size_t i = 0; i < m_entities.size(); ++i) {
 		Entity& e = m_entities[i];
-		if (e.type != EntityType::Enemy) continue;
+		if (e.type != EntityType::Enemy || !e.active || e.dead) continue;
 
 		e.prevPos = e.pos;
 
 		Vec2 toPlayer = player.pos - e.pos;
-		float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
+		float distSq = LengthSq(toPlayer);
 		float aggroSq = e.aggroRadius * e.aggroRadius;
+		float leashRadius = e.aggroRadius * m_enemyLeashMultiplier;
+		float leashSq = leashRadius * leashRadius;
 
 		// State transitions
 		if (e.ai == AIState::Idle && distSq <= aggroSq) {
 			e.ai = AIState::Seek;
+			// Force an immediate path request the moment this enemy wakes up.
+			e.path.repathTimer = 0.0f;
 		}
-		else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) {
-			// hysteresis so it doesn't flicker
+		else if (e.ai == AIState::Seek && distSq > leashSq) {
+			// Let enemies drop aggro if the player gets far enough away.
 			e.ai = AIState::Idle;
+			e.path.waypoints.clear();
+			e.path.index = 0;
+			e.path.lastGoalTX = 999999;
+			e.path.lastGoalTY = 999999;
 		}
 
 		// Behavior
 		if (e.ai == AIState::Seek && distSq > 0.0001f) {
-			const float repathInterval = 0.25f;  // 4x/sec
-			const float waypointReach = 8.0f;
+			float repathInterval = 0.55f;
+			switch (e.enemyKind) {
+			case EnemyKind::Fast: repathInterval = 0.35f; break;
+			case EnemyKind::Tank: repathInterval = 0.85f; break;
+			default: break;
+			}
+			// Tiny jitter based on ID so every enemy does not request a new path on the same frame.
+			repathInterval += float(e.id % 5) * 0.03f;
+
+			const float waypointReach = 10.0f;
 			const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
+			const bool directChase = (distSq <= (96.0f * 96.0f));
 
 			TileCoord goalT = m_map.WorldToTile(player.pos);
-
-			// timers
 			e.path.repathTimer -= fixedDt;
 
-			// repath conditions
 			bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
 			bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
 
-			if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
+			if (!directChase && e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
 				TileCoord startT = m_map.WorldToTile(e.pos);
 
 				auto tiles = Pathfinding::AStar(m_map, startT, goalT);
@@ -583,7 +601,7 @@ if (m_flowState == FlowState::Win) {
 					e.path.waypoints.push_back(wp);
 				}
 				if (e.path.waypoints.size() > 1) {
-					e.path.index = 1; // skip start tile center
+					e.path.index = 1; // skip the tile we are already standing in
 				}
 
 				e.path.repathTimer = repathInterval;
@@ -591,30 +609,75 @@ if (m_flowState == FlowState::Win) {
 				e.path.lastGoalTY = goalT.y;
 			}
 
-			// Follow path
-			if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+			Vec2 desiredDir{ 0.0f, 0.0f };
+
+			if (directChase) {
+				float invLen = 1.0f / std::sqrt(std::max(distSq, 0.0001f));
+				desiredDir = Vec2{ toPlayer.x * invLen, toPlayer.y * invLen };
+			}
+			else if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
 				Vec2 target = e.path.waypoints[e.path.index];
 				Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
 
-				float distSq2 = to.x * to.x + to.y * to.y;
+				float distSq2 = LengthSq(to);
 				if (distSq2 < waypointReach * waypointReach) {
 					e.path.index++;
+					if (e.path.index < (int)e.path.waypoints.size()) {
+						target = e.path.waypoints[e.path.index];
+						to = Vec2{ target.x - e.pos.x, target.y - e.pos.y };
+						distSq2 = LengthSq(to);
+					}
 				}
-				else if (distSq2 > 0.0001f) {
-					float invLen = 1.0f / std::sqrt(distSq2);
-					Vec2 dir{ to.x * invLen, to.y * invLen };
 
-					e.pos = Vec2{
-						e.pos.x + dir.x * (enemySpeed * fixedDt),
-						e.pos.y + dir.y * (enemySpeed * fixedDt)
-					};
+				if (distSq2 > 0.0001f) {
+					float invLen = 1.0f / std::sqrt(distSq2);
+					desiredDir = Vec2{ to.x * invLen, to.y * invLen };
 				}
+			}
+
+			// Soft local steering so enemies stop marching as one blob.
+			Vec2 avoid{ 0.0f, 0.0f };
+			const float avoidRadiusSq = m_enemyAvoidRadius * m_enemyAvoidRadius;
+			for (size_t j = 0; j < m_entities.size(); ++j) {
+				if (j == i) continue;
+				const Entity& other = m_entities[j];
+				if (other.type != EntityType::Enemy || !other.active || other.dead) continue;
+
+				Vec2 away = e.pos - other.pos;
+				float otherDistSq = LengthSq(away);
+				if (otherDistSq <= 0.0001f || otherDistSq > avoidRadiusSq) continue;
+
+				float otherDist = std::sqrt(otherDistSq);
+				float weight = 1.0f - (otherDist / m_enemyAvoidRadius);
+				avoid.x += (away.x / otherDist) * weight;
+				avoid.y += (away.y / otherDist) * weight;
+			}
+
+			Vec2 moveDir = desiredDir;
+			float avoidLenSq = LengthSq(avoid);
+			if (avoidLenSq > 0.0001f) {
+				float avoidInvLen = 1.0f / std::sqrt(avoidLenSq);
+				avoid.x *= avoidInvLen;
+				avoid.y *= avoidInvLen;
+				moveDir.x += avoid.x * m_enemyAvoidStrength;
+				moveDir.y += avoid.y * m_enemyAvoidStrength;
+			}
+
+			float moveLenSq = LengthSq(moveDir);
+			if (moveLenSq > 0.0001f) {
+				float invLen = 1.0f / std::sqrt(moveLenSq);
+				moveDir.x *= invLen;
+				moveDir.y *= invLen;
+
+				e.pos = Vec2{
+					e.pos.x + moveDir.x * (enemySpeed * fixedDt),
+					e.pos.y + moveDir.y * (enemySpeed * fixedDt)
+				};
 			}
 
 			// Wall collision (keep from sliding through)
 			m_map.ResolveCircleCollision(e.pos, e.radius);
 		}
-
 	}
 
 
