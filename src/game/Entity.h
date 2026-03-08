@@ -57,5 +57,6 @@ struct Entity {
     // --- Combat polish ---
     Vec2  vel{ 0,0 };              // velocity used for knockback and movement smoothing
     float hitstun = 0.0f;        // seconds remaining unable to act
+    float stunTimer = 0.0f;      // player utility stun pulse
     bool  dead = false;          // death flag
 };

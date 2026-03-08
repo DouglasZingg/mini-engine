@@ -9,6 +9,7 @@ struct TileCoord;
 class Tilemap {
 public:
     bool LoadCSV(const char* path);
+    bool LoadFromData(int width, int height, const std::vector<int>& tiles);
 
     int Width() const { return m_w; }
     int Height() const { return m_h; }

@@ -42,6 +42,18 @@ bool Tilemap::LoadCSV(const char* path) {
     return (m_w > 0 && m_h > 0);
 }
 
+
+
+bool Tilemap::LoadFromData(int width, int height, const std::vector<int>& tiles) {
+    if (width <= 0 || height <= 0) return false;
+    if ((int)tiles.size() != width * height) return false;
+
+    m_w = width;
+    m_h = height;
+    m_tiles = tiles;
+    return true;
+}
+
 bool Tilemap::IsSolidAtWorld(const Vec2& world) const {
     int tx = (int)std::floor(world.x / (float)m_tileSize);
     int ty = (int)std::floor(world.y / (float)m_tileSize);

@@ -32,6 +32,7 @@ private:
     void UpdateCameraFollow(SdlPlatform& platform, const Entity& player);
     void UpdateWorldSizeFromMap();
     void ValidateAndSanitizeMap();
+    bool GenerateProceduralLevel(int levelIndex);
     void DrawWorldGrid(SdlPlatform& platform) const;
     void RestartGame();
 
@@ -82,6 +83,14 @@ private:
     float m_shieldTimer = 0.0f;
     float m_shieldDuration = 2.5f;
 
+    // Player utility move: short-range stun pulse.
+    float m_stunCooldown = 5.0f;
+    float m_stunCooldownTimer = 0.0f;
+    float m_stunRadius = 120.0f;
+    float m_stunDuration = 1.5f;
+    float m_stunPulseTimer = 0.0f;
+    float m_stunPulseDuration = 0.25f;
+
     std::filesystem::file_time_type m_cfgTimestamp{};
     float m_cfgPollTimer = 0.0f;
 
@@ -130,9 +139,4 @@ private:
     // enemies
     float m_enemyKnockbackStrength = 450.0f;
     float m_enemyHitstunSeconds = 0.08f;
-
-    // AI polish
-    float m_enemyLeashMultiplier = 1.75f;   // drop aggro if the player gets far enough away
-    float m_enemyAvoidRadius = 52.0f;       // soft separation while moving so enemies do not stack as much
-    float m_enemyAvoidStrength = 0.65f;     // how much the avoidance vector bends movement
 };

@@ -30,6 +30,7 @@ Input::ActionBind Input::Bind(Action a) {
     case Action::Cancel:     return { Key::Escape, Key::Count };
     case Action::Restart:    return { Key::R, Key::Count };
     case Action::ToggleDebug:return { Key::Tab, Key::Count };
+    case Action::Stun:       return { Key::Space, Key::Count };
     default:                 return { Key::Count, Key::Count };
     }
 }

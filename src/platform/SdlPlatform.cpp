@@ -115,6 +115,7 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     m_input.SetKey(Key::Tab, keys[SDL_SCANCODE_TAB] != 0);
     m_input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
     m_input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
+    m_input.SetKey(Key::Space, keys[SDL_SCANCODE_SPACE] != 0);
     m_input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
 
     // Output a copy for this frame.

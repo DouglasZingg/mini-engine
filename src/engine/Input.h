@@ -15,6 +15,7 @@ enum class Key : uint8_t {
     Tab,
     Return,
     R,
+    Space,
     F11,
     Count
 };
@@ -28,6 +29,7 @@ enum class Action : uint8_t {
     Cancel,
     Restart,
     ToggleDebug,
+    Stun,
     Count
 };
 

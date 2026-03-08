@@ -5,6 +5,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <algorithm>
+#include <array>
+#include <random>
+#include <queue>
 #include <engine/Assets.h>
 #include "engine/Paths.h"
 // -----------------------------
@@ -111,6 +114,62 @@ static void DrawMenuOverlay(SdlPlatform& platform, const SdlTexture& font,
         }
     }
 }
+
+
+
+static void DrawPulseDots(SdlPlatform& platform, const Camera2D& camera, const Vec2& center, float radius, int dotSize, int r, int g, int b) {
+    constexpr int kDotCount = 24;
+    const float twoPi = 6.28318530718f;
+    for (int i = 0; i < kDotCount; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(kDotCount);
+        const float ang = t * twoPi;
+        const Vec2 worldPos{
+            center.x + std::cos(ang) * radius,
+            center.y + std::sin(ang) * radius
+        };
+        const Vec2 screenPos = camera.WorldToScreen(worldPos);
+        const int drawX = static_cast<int>(screenPos.x) - dotSize / 2;
+        const int drawY = static_cast<int>(screenPos.y) - dotSize / 2;
+        platform.DrawFilledRect(drawX, drawY, dotSize, dotSize,
+            static_cast<std::uint8_t>(r), static_cast<std::uint8_t>(g), static_cast<std::uint8_t>(b));
+    }
+}
+
+static bool IsWalkableProcTile(int v) {
+    return v != 1;
+}
+
+static int CountReachableFloorTiles(const std::vector<int>& tiles, int w, int h, int sx, int sy) {
+    if (w <= 0 || h <= 0) return 0;
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) return 0;
+    auto idx = [w](int x, int y) { return y * w + x; };
+    if (!IsWalkableProcTile(tiles[idx(sx, sy)])) return 0;
+
+    std::vector<unsigned char> seen((size_t)w * (size_t)h, 0);
+    std::queue<std::pair<int,int>> q;
+    q.push({sx, sy});
+    seen[idx(sx, sy)] = 1;
+    int count = 0;
+
+    const int dirs[4][2] = { {1,0},{-1,0},{0,1},{0,-1} };
+    while (!q.empty()) {
+        auto [x, y] = q.front();
+        q.pop();
+        ++count;
+        for (const auto& d : dirs) {
+            int nx = x + d[0];
+            int ny = y + d[1];
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            int id = idx(nx, ny);
+            if (seen[id]) continue;
+            if (!IsWalkableProcTile(tiles[id])) continue;
+            seen[id] = 1;
+            q.push({nx, ny});
+        }
+    }
+    return count;
+}
+
 // -----------------------------
 // ECS-lite: entity creation
 // -----------------------------
@@ -132,7 +191,7 @@ bool Game::Init(SdlPlatform& platform) {
 	if (!m_assets.Init(platform))
 		return false;
 
-	m_map.LoadCSV("assets/maps/level01.csv");
+	GenerateProceduralLevel(m_currentLevel);
 	ValidateAndSanitizeMap();
 	UpdateWorldSizeFromMap();
 
@@ -145,7 +204,7 @@ bool Game::Init(SdlPlatform& platform) {
 
 	// Hot-reload timestamp init
 	try {
-		m_cfgTimestamp = std::filesystem::last_write_time("assets/config.json");
+		m_cfgTimestamp = std::filesystem::last_write_time(AssetPath("assets/config.json"));
 	}
 	catch (...) {}
 	m_cfgPollTimer = 0.0f;
@@ -241,6 +300,7 @@ const bool confirmPressed = input.Pressed(Action::Confirm);
 const bool cancelPressed  = input.Pressed(Action::Cancel);
 const bool restartPressed = input.Pressed(Action::Restart);
 const bool debugPressed   = input.Pressed(Action::ToggleDebug);
+const bool stunPressed    = input.Pressed(Action::Stun);
 // Keep legacy flags in sync for any old render paths
 	m_gameWin = (m_flowState == FlowState::Win);
 	m_gameOver = (m_flowState == FlowState::Lose);
@@ -258,6 +318,11 @@ const bool debugPressed   = input.Pressed(Action::ToggleDebug);
 
         if (confirmPressed) {
             if (m_titleMenuIndex == 0) {          // Start
+                m_currentLevel = 1;
+                GenerateProceduralLevel(m_currentLevel);
+                ValidateAndSanitizeMap();
+                UpdateWorldSizeFromMap();
+                RestartGame();
                 m_flowState = FlowState::Playing;
             } else if (m_titleMenuIndex == 1) {   // Controls
                 m_flowState = FlowState::Controls;
@@ -345,9 +410,7 @@ if (m_flowState == FlowState::Win) {
             m_currentLevel++;
             if (m_currentLevel > 10) m_currentLevel = 1;
 
-            char mapPath[64];
-            std::snprintf(mapPath, sizeof(mapPath), "assets/maps/level%02d.csv", m_currentLevel);
-            m_map.LoadCSV(mapPath);
+            GenerateProceduralLevel(m_currentLevel);
             ValidateAndSanitizeMap();
             UpdateWorldSizeFromMap();
 
@@ -401,10 +464,10 @@ if (m_flowState == FlowState::Win) {
 	if (m_cfgPollTimer >= 1.0f) {
 		m_cfgPollTimer = 0.0f;
 		try {
-			auto t = std::filesystem::last_write_time("assets/config.json");
+			auto t = std::filesystem::last_write_time(AssetPath("assets/config.json"));
 			if (t != m_cfgTimestamp) {
 				m_cfgTimestamp = t;
-				ReloadConfig("assets/config.json");
+				ReloadConfig(AssetPath("assets/config.json").c_str());
 				std::printf("[HOTRELOAD] config.json reloaded\n");
 			}
 		}
@@ -416,7 +479,7 @@ if (m_flowState == FlowState::Win) {
 	// --------------------
 	if (dbg.requestReloadConfig) {
 		dbg.requestReloadConfig = false;
-		ReloadConfig("assets/config.json");
+		ReloadConfig(AssetPath("assets/config.json").c_str());
 	}
 
 	// --------------------
@@ -484,6 +547,14 @@ if (m_flowState == FlowState::Win) {
 		m_shieldTimer -= fixedDt;
 		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
 	}
+	if (m_stunCooldownTimer > 0.0f) {
+		m_stunCooldownTimer -= fixedDt;
+		if (m_stunCooldownTimer < 0.0f) m_stunCooldownTimer = 0.0f;
+	}
+	if (m_stunPulseTimer > 0.0f) {
+		m_stunPulseTimer -= fixedDt;
+		if (m_stunPulseTimer < 0.0f) m_stunPulseTimer = 0.0f;
+	}
 
 	// --------------------
 	// HUD feedback timers (toast + damage flash)
@@ -524,6 +595,29 @@ if (m_flowState == FlowState::Win) {
 		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
 	}
 
+
+// Player utility move: short-range stun pulse.
+if (stunPressed && m_stunCooldownTimer <= 0.0f) {
+	m_stunCooldownTimer = m_stunCooldown;
+	m_stunPulseTimer = m_stunPulseDuration;
+	m_toastText = "STUN USED";
+	m_toastTimer = m_toastDuration;
+
+	for (Entity& e : m_entities) {
+		if (!e.active || e.type != EntityType::Enemy) continue;
+		Vec2 d = e.pos - player.pos;
+		float distSq = d.x * d.x + d.y * d.y;
+		if (distSq <= m_stunRadius * m_stunRadius) {
+			float stunScale = (e.enemyKind == EnemyKind::Tank) ? 0.65f : 1.0f;
+			e.stunTimer = std::max(e.stunTimer, m_stunDuration * stunScale);
+			e.path.waypoints.clear();
+			e.path.index = 0;
+			e.path.repathTimer = 0.0f;
+			e.vel = { 0.0f, 0.0f };
+		}
+	}
+}
+
 	// knockback damping (always runs)
 	player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
 
@@ -534,62 +628,50 @@ if (m_flowState == FlowState::Win) {
 	m_map.ResolveCircleCollision(player.pos, player.radius);
 
 	// --------------------
-	// AI SYSTEM (Idle -> Seek with leash / repath throttling / soft steering)
+	// AI SYSTEM (Idle -> Seek)
 	// --------------------
-
-	auto LengthSq = [](Vec2 v) {
-		return v.x * v.x + v.y * v.y;
-	};
 
 	for (size_t i = 0; i < m_entities.size(); ++i) {
 		Entity& e = m_entities[i];
-		if (e.type != EntityType::Enemy || !e.active || e.dead) continue;
+		if (e.type != EntityType::Enemy) continue;
 
 		e.prevPos = e.pos;
+		if (e.stunTimer > 0.0f) {
+			e.stunTimer -= fixedDt;
+			if (e.stunTimer < 0.0f) e.stunTimer = 0.0f;
+			e.vel = { 0.0f, 0.0f };
+			continue;
+		}
 
 		Vec2 toPlayer = player.pos - e.pos;
-		float distSq = LengthSq(toPlayer);
+		float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
 		float aggroSq = e.aggroRadius * e.aggroRadius;
-		float leashRadius = e.aggroRadius * m_enemyLeashMultiplier;
-		float leashSq = leashRadius * leashRadius;
 
 		// State transitions
 		if (e.ai == AIState::Idle && distSq <= aggroSq) {
 			e.ai = AIState::Seek;
-			// Force an immediate path request the moment this enemy wakes up.
-			e.path.repathTimer = 0.0f;
 		}
-		else if (e.ai == AIState::Seek && distSq > leashSq) {
-			// Let enemies drop aggro if the player gets far enough away.
+		else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) {
+			// hysteresis so it doesn't flicker
 			e.ai = AIState::Idle;
-			e.path.waypoints.clear();
-			e.path.index = 0;
-			e.path.lastGoalTX = 999999;
-			e.path.lastGoalTY = 999999;
 		}
 
 		// Behavior
 		if (e.ai == AIState::Seek && distSq > 0.0001f) {
-			float repathInterval = 0.55f;
-			switch (e.enemyKind) {
-			case EnemyKind::Fast: repathInterval = 0.35f; break;
-			case EnemyKind::Tank: repathInterval = 0.85f; break;
-			default: break;
-			}
-			// Tiny jitter based on ID so every enemy does not request a new path on the same frame.
-			repathInterval += float(e.id % 5) * 0.03f;
-
-			const float waypointReach = 10.0f;
+			const float repathInterval = 0.25f;  // 4x/sec
+			const float waypointReach = 8.0f;
 			const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
-			const bool directChase = (distSq <= (96.0f * 96.0f));
 
 			TileCoord goalT = m_map.WorldToTile(player.pos);
+
+			// timers
 			e.path.repathTimer -= fixedDt;
 
+			// repath conditions
 			bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
 			bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
 
-			if (!directChase && e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
+			if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
 				TileCoord startT = m_map.WorldToTile(e.pos);
 
 				auto tiles = Pathfinding::AStar(m_map, startT, goalT);
@@ -601,7 +683,7 @@ if (m_flowState == FlowState::Win) {
 					e.path.waypoints.push_back(wp);
 				}
 				if (e.path.waypoints.size() > 1) {
-					e.path.index = 1; // skip the tile we are already standing in
+					e.path.index = 1; // skip start tile center
 				}
 
 				e.path.repathTimer = repathInterval;
@@ -609,75 +691,30 @@ if (m_flowState == FlowState::Win) {
 				e.path.lastGoalTY = goalT.y;
 			}
 
-			Vec2 desiredDir{ 0.0f, 0.0f };
-
-			if (directChase) {
-				float invLen = 1.0f / std::sqrt(std::max(distSq, 0.0001f));
-				desiredDir = Vec2{ toPlayer.x * invLen, toPlayer.y * invLen };
-			}
-			else if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+			// Follow path
+			if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
 				Vec2 target = e.path.waypoints[e.path.index];
 				Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
 
-				float distSq2 = LengthSq(to);
+				float distSq2 = to.x * to.x + to.y * to.y;
 				if (distSq2 < waypointReach * waypointReach) {
 					e.path.index++;
-					if (e.path.index < (int)e.path.waypoints.size()) {
-						target = e.path.waypoints[e.path.index];
-						to = Vec2{ target.x - e.pos.x, target.y - e.pos.y };
-						distSq2 = LengthSq(to);
-					}
 				}
-
-				if (distSq2 > 0.0001f) {
+				else if (distSq2 > 0.0001f) {
 					float invLen = 1.0f / std::sqrt(distSq2);
-					desiredDir = Vec2{ to.x * invLen, to.y * invLen };
+					Vec2 dir{ to.x * invLen, to.y * invLen };
+
+					e.pos = Vec2{
+						e.pos.x + dir.x * (enemySpeed * fixedDt),
+						e.pos.y + dir.y * (enemySpeed * fixedDt)
+					};
 				}
-			}
-
-			// Soft local steering so enemies stop marching as one blob.
-			Vec2 avoid{ 0.0f, 0.0f };
-			const float avoidRadiusSq = m_enemyAvoidRadius * m_enemyAvoidRadius;
-			for (size_t j = 0; j < m_entities.size(); ++j) {
-				if (j == i) continue;
-				const Entity& other = m_entities[j];
-				if (other.type != EntityType::Enemy || !other.active || other.dead) continue;
-
-				Vec2 away = e.pos - other.pos;
-				float otherDistSq = LengthSq(away);
-				if (otherDistSq <= 0.0001f || otherDistSq > avoidRadiusSq) continue;
-
-				float otherDist = std::sqrt(otherDistSq);
-				float weight = 1.0f - (otherDist / m_enemyAvoidRadius);
-				avoid.x += (away.x / otherDist) * weight;
-				avoid.y += (away.y / otherDist) * weight;
-			}
-
-			Vec2 moveDir = desiredDir;
-			float avoidLenSq = LengthSq(avoid);
-			if (avoidLenSq > 0.0001f) {
-				float avoidInvLen = 1.0f / std::sqrt(avoidLenSq);
-				avoid.x *= avoidInvLen;
-				avoid.y *= avoidInvLen;
-				moveDir.x += avoid.x * m_enemyAvoidStrength;
-				moveDir.y += avoid.y * m_enemyAvoidStrength;
-			}
-
-			float moveLenSq = LengthSq(moveDir);
-			if (moveLenSq > 0.0001f) {
-				float invLen = 1.0f / std::sqrt(moveLenSq);
-				moveDir.x *= invLen;
-				moveDir.y *= invLen;
-
-				e.pos = Vec2{
-					e.pos.x + moveDir.x * (enemySpeed * fixedDt),
-					e.pos.y + moveDir.y * (enemySpeed * fixedDt)
-				};
 			}
 
 			// Wall collision (keep from sliding through)
 			m_map.ResolveCircleCollision(e.pos, e.radius);
 		}
+
 	}
 
 
@@ -702,7 +739,7 @@ if (m_flowState == FlowState::Win) {
 
 		Entity& e = m_entities[i];
 		if (e.type != EntityType::Enemy) continue;
-
+		if (e.stunTimer > 0.0f) continue;
 
 		if (CheckCollision(player, e)) {
 			// Separate both bodies to avoid "sticky" overlap.
@@ -899,8 +936,8 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
         // Simple controls page (keep it readable, no fancy layout yet)
         DrawCenteredOverlay(platform, m_assets.Font(),
             "CONTROLS",
-            "WASD: Move   TAB: Debug UI",
-            "ENTER/ESC: Back"
+            "WASD: Move   SPACE: Stun",
+            "TAB: Debug UI   ENTER/ESC: Back"
         );
         return;
     }
@@ -1009,10 +1046,21 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 			default: break;
 			}
 			platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+			if (e.stunTimer > 0.0f) {
+				platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
+			}
 		}
 	}
 
 
+
+
+// Stun pulse visual so the player can read the ability clearly.
+if (m_stunPulseTimer > 0.0f) {
+	const float t = 1.0f - (m_stunPulseTimer / m_stunPulseDuration);
+	const float radius = std::max(8.0f, m_stunRadius * t);
+	DrawPulseDots(platform, m_camera, player.pos, radius, 6, 80, 220, 255);
+}
 
 	// --------------------
 	// HUD (screen-space)
@@ -1165,6 +1213,13 @@ void Game::DrawHUD(SdlPlatform& platform) const
         platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
         y += glyphH * scale + 6;
     }
+
+    if (m_stunCooldownTimer <= 0.0f) {
+        std::snprintf(line, sizeof(line), "STUN: READY");
+    } else {
+        std::snprintf(line, sizeof(line), "STUN: %.1fs", m_stunCooldownTimer);
+    }
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
 }
 
 void Game::DrawToast(SdlPlatform& platform) const
@@ -1321,6 +1376,166 @@ void Game::ValidateAndSanitizeMap()
         if (!m_levelValidationMsg.empty()) m_levelValidationMsg += "  ";
         m_levelValidationMsg += "Found invalid tile values; replaced " + std::to_string(badTileCount) + " with floor (0).";
     }
+}
+
+
+bool Game::GenerateProceduralLevel(int levelIndex) {
+    const int width = 40;
+    const int height = 24;
+    std::vector<int> tiles((size_t)width * (size_t)height, 1);
+    auto idx = [width](int x, int y) { return y * width + x; };
+
+    std::mt19937 rng((uint32_t)(0xC0FFEEu + (uint32_t)levelIndex * 977u));
+
+    auto carve = [&](int x, int y) {
+        tiles[idx(x, y)] = 0;
+    };
+
+    // Start with a maze on odd cells so there is always a path structure.
+    carve(1, 1);
+    std::vector<std::pair<int,int>> stack;
+    stack.push_back({1, 1});
+    const int dirOrder[4][2] = { {2,0},{-2,0},{0,2},{0,-2} };
+
+    while (!stack.empty()) {
+        auto [cx, cy] = stack.back();
+        std::array<int,4> order = {0,1,2,3};
+        std::shuffle(order.begin(), order.end(), rng);
+
+        bool moved = false;
+        for (int oi = 0; oi < 4; ++oi) {
+            const int* d = dirOrder[order[oi]];
+            int nx = cx + d[0];
+            int ny = cy + d[1];
+            if (nx <= 0 || ny <= 0 || nx >= width - 1 || ny >= height - 1) continue;
+            if (tiles[idx(nx, ny)] == 0) continue;
+            carve(cx + d[0] / 2, cy + d[1] / 2);
+            carve(nx, ny);
+            stack.push_back({nx, ny});
+            moved = true;
+            break;
+        }
+
+        if (!moved) stack.pop_back();
+    }
+
+    // Put the player in a central safe room so every level starts readable.
+    const int roomHalfW = 3;
+    const int roomHalfH = 2;
+    const int centerX = width / 2;
+    const int centerY = height / 2;
+    for (int y = centerY - roomHalfH; y <= centerY + roomHalfH; ++y) {
+        for (int x = centerX - roomHalfW; x <= centerX + roomHalfW; ++x) {
+            if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) continue;
+            carve(x, y);
+        }
+    }
+    carve(centerX, centerY - roomHalfH - 1);
+    carve(centerX, centerY + roomHalfH + 1);
+    carve(centerX - roomHalfW - 1, centerY);
+    carve(centerX + roomHalfW + 1, centerY);
+
+    const int playerX = centerX;
+    const int playerY = centerY;
+
+    // Collect walkable cells and split them into safe / far buckets.
+    std::vector<std::pair<int,int>> pickupCells;
+    std::vector<std::pair<int,int>> enemyCells;
+    std::vector<std::pair<int,int>> farCells;
+
+    auto manhattan = [](int ax, int ay, int bx, int by) { return std::abs(ax - bx) + std::abs(ay - by); };
+
+    for (int y = 1; y < height - 1; ++y) {
+        for (int x = 1; x < width - 1; ++x) {
+            if (tiles[idx(x, y)] != 0) continue;
+            if (x == playerX && y == playerY) continue;
+
+            int d = manhattan(x, y, playerX, playerY);
+            if (d >= 4) pickupCells.push_back({x, y});
+            if (d >= 8) enemyCells.push_back({x, y});
+            if (d >= 12) farCells.push_back({x, y});
+        }
+    }
+
+    auto placeFrom = [&](std::vector<std::pair<int,int>>& cells, int value, int count) {
+        for (int i = 0; i < count && !cells.empty(); ++i) {
+            std::uniform_int_distribution<int> dist(0, (int)cells.size() - 1);
+            int pick = dist(rng);
+            auto [x, y] = cells[pick];
+            std::swap(cells[pick], cells.back());
+            cells.pop_back();
+            tiles[idx(x, y)] = value;
+        }
+    };
+
+    std::shuffle(pickupCells.begin(), pickupCells.end(), rng);
+    std::shuffle(enemyCells.begin(), enemyCells.end(), rng);
+    std::shuffle(farCells.begin(), farCells.end(), rng);
+
+    // Difficulty ramp matches the earlier CSV rules, just generated now.
+    const int basicPickups = std::min((int)pickupCells.size(), 3 + levelIndex * 2);
+    const int basicEnemies = std::min((int)enemyCells.size(), 2 + levelIndex);
+
+    int healthCount = 0, speedCount = 0, shieldCount = 0, fastCount = 0, tankCount = 0;
+    if (levelIndex >= 4) {
+        healthCount = 1 + (levelIndex - 4);
+        speedCount = 1 + (levelIndex - 4) / 2;
+    }
+    if (levelIndex >= 7) {
+        shieldCount = 1 + (levelIndex - 7);
+        fastCount = 1 + (levelIndex - 7);
+        tankCount = 1 + (levelIndex - 7) / 2;
+    }
+
+    placeFrom(pickupCells, 2, basicPickups);
+    placeFrom(farCells, 5, healthCount);
+    placeFrom(farCells, 6, speedCount);
+    placeFrom(farCells, 7, shieldCount);
+
+    placeFrom(enemyCells, 3, basicEnemies);
+    placeFrom(enemyCells, 8, fastCount);
+    placeFrom(enemyCells, 9, tankCount);
+
+    tiles[idx(playerX, playerY)] = 4;
+
+    // Safety net: make sure the level did not end up too cramped.
+    const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
+    if (reachable < 80) {
+        m_levelValidationMsg = "Generated level was too cramped. Using a simpler open fallback layout.";
+        std::fill(tiles.begin(), tiles.end(), 0);
+        for (int x = 0; x < width; ++x) {
+            tiles[idx(x, 0)] = 1;
+            tiles[idx(x, height - 1)] = 1;
+        }
+        for (int y = 0; y < height; ++y) {
+            tiles[idx(0, y)] = 1;
+            tiles[idx(width - 1, y)] = 1;
+        }
+        // Add a few chunky walls so it is still a level and not just an empty box.
+        for (int x = 6; x < width - 6; ++x) {
+            if (x == centerX) continue;
+            tiles[idx(x, 6)] = 1;
+            tiles[idx(x, height - 7)] = 1;
+        }
+        for (int y = 5; y < height - 5; ++y) {
+            if (y == centerY) continue;
+            tiles[idx(8, y)] = 1;
+            tiles[idx(width - 9, y)] = 1;
+        }
+        // Restore the safe room and simple content.
+        for (int y = centerY - roomHalfH; y <= centerY + roomHalfH; ++y) {
+            for (int x = centerX - roomHalfW; x <= centerX + roomHalfW; ++x) tiles[idx(x, y)] = 0;
+        }
+        tiles[idx(playerX, playerY)] = 4;
+        if (centerX + 10 < width - 1) tiles[idx(centerX + 10, centerY)] = 3;
+        if (centerX - 8 > 0) tiles[idx(centerX - 8, centerY + 3)] = 2;
+        if (levelIndex >= 4 && centerX + 12 < width - 1) tiles[idx(centerX + 12, centerY + 4)] = 5;
+        if (levelIndex >= 7 && centerX - 12 > 0) tiles[idx(centerX - 12, centerY - 4)] = 8;
+    } else {
+        m_levelValidationMsg = "Procedural level generated from seed " + std::to_string(0xC0FFEEu + (uint32_t)levelIndex * 977u) + ".";
+    }
+
+    return m_map.LoadFromData(width, height, tiles);
 }
 
 void Game::RestartGame() {
