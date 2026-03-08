@@ -55,9 +55,17 @@ void App::Run() {
         // Prevent spiral of death if the app hitches
         if (accumulator > 0.25f) accumulator = 0.25f;
 
+        bool consumedEdgeInput = false;
         while (accumulator >= fixedDt) {
             game.Update(g_platform, frame.input, fixedDt, dbg);
             accumulator -= fixedDt;
+
+            if (!consumedEdgeInput) {
+                // Prevent menu/input presses from firing multiple times if we do several fixed
+                // updates off a single platform/input snapshot.
+                frame.input.ConsumeTransient();
+                consumedEdgeInput = true;
+            }
         }
 
         if (game.RequestedQuit())

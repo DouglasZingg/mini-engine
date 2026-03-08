@@ -269,626 +269,571 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 }
 
 
-void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
-	Entity& player = m_entities[m_playerIndex];
 
-	auto TickCombatTimers = [&](Entity& e) {
-		if (e.hitstun > 0.0f) {
-			e.hitstun -= fixedDt;
-			if (e.hitstun < 0.0f) e.hitstun = 0.0f;
-		}
-		if (e.invulnTimer > 0.0f) {
-			e.invulnTimer -= fixedDt;
-			if (e.invulnTimer < 0.0f) e.invulnTimer = 0.0f;
-		}
-		};
+void Game::SyncDebugSnapshot(DebugState& dbg) const {
+    dbg.entityCount = (int)m_entities.size();
 
-	for (Entity& e : m_entities) {
-		if (!e.active) continue;
-		TickCombatTimers(e);
-	}
+    int enemyCount = 0;
+    for (const Entity& e : m_entities) {
+        if (e.active && e.type == EntityType::Enemy) enemyCount++;
+    }
+    dbg.enemyCount = enemyCount;
 
-	// --------------------
-// AUTHORITATIVE FLOW INPUT (edge-triggered)
-// --------------------
-// All flow/menu screens use action presses (not held) so a key doesn't repeat every tick.
-const bool upPressed      = input.Pressed(Action::Up);
-const bool downPressed    = input.Pressed(Action::Down);
-const bool leftPressed    = input.Pressed(Action::Left);
-const bool rightPressed   = input.Pressed(Action::Right);
-const bool confirmPressed = input.Pressed(Action::Confirm);
-const bool cancelPressed  = input.Pressed(Action::Cancel);
-const bool restartPressed = input.Pressed(Action::Restart);
-const bool debugPressed   = input.Pressed(Action::ToggleDebug);
-const bool stunPressed    = input.Pressed(Action::Stun);
-// Keep legacy flags in sync for any old render paths
-	m_gameWin = (m_flowState == FlowState::Win);
-	m_gameOver = (m_flowState == FlowState::Lose);
+    if (m_playerIndex >= 0 && m_playerIndex < (int)m_entities.size()) {
+        dbg.playerPos = m_entities[m_playerIndex].pos;
+        dbg.playerHealth = m_entities[m_playerIndex].health;
+    } else {
+        dbg.playerPos = Vec2{ 0.0f, 0.0f };
+        dbg.playerHealth = 0;
+    }
 
-	// --------------------
-	// FLOW STATE HANDLING
-	// --------------------
-	// Update() owns state transitions only. Render() owns drawing for these screens.
-	if (m_flowState == FlowState::Title) {
-        // ---- Title Menu ----
-        const int itemCount = 3; // Start / Controls / Quit
+    dbg.cameraPos = m_camera.Position();
+    dbg.gameOver = (m_flowState == FlowState::Lose);
 
+    dbg.debugEntityCount = 0;
+    for (const Entity& e : m_entities) {
+        if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
+        auto& row = dbg.debugEntities[dbg.debugEntityCount++];
+
+        row.id = e.id;
+        if (e.type == EntityType::Player) row.type = 0;
+        else if (e.type == EntityType::Enemy) row.type = 1;
+        else if (e.type == EntityType::Pickup) row.type = 2;
+        else row.type = 3;
+
+        row.x = e.pos.x;
+        row.y = e.pos.y;
+        row.radius = e.radius;
+        row.ai = (e.type == EntityType::Enemy && e.ai == AIState::Seek) ? 1 : 0;
+    }
+}
+
+bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
+    const bool upPressed = input.Pressed(Action::Up);
+    const bool downPressed = input.Pressed(Action::Down);
+    const bool confirmPressed = input.Pressed(Action::Confirm);
+    const bool cancelPressed = input.Pressed(Action::Cancel);
+    const bool restartPressed = input.Pressed(Action::Restart);
+
+    m_gameWin = (m_flowState == FlowState::Win);
+    m_gameOver = (m_flowState == FlowState::Lose);
+
+    switch (m_flowState) {
+    case FlowState::Title: {
+        const int itemCount = 3;
         if (upPressed)   m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount;
         if (downPressed) m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount;
 
         if (confirmPressed) {
-            if (m_titleMenuIndex == 0) {          // Start
-                m_currentLevel = 1;
-                GenerateProceduralLevel(m_currentLevel);
-                ValidateAndSanitizeMap();
-                UpdateWorldSizeFromMap();
-                RestartGame();
-                m_flowState = FlowState::Playing;
-            } else if (m_titleMenuIndex == 1) {   // Controls
-                m_flowState = FlowState::Controls;
-            } else {                               // Quit
-                m_requestQuit = true;
-            }
+            if (m_titleMenuIndex == 0) m_flowState = FlowState::Playing;
+            else if (m_titleMenuIndex == 1) m_flowState = FlowState::Controls;
+            else m_requestQuit = true;
         }
+        if (cancelPressed) m_requestQuit = true;
 
-        if (cancelPressed) {
-            m_requestQuit = true;
-        }
-
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
-        return;
+        SyncDebugSnapshot(dbg);
+        return true;
     }
 
-    if (m_flowState == FlowState::Controls) {
-        // Any confirm/cancel goes back to title.
-        if (confirmPressed || cancelPressed) {
-            m_flowState = FlowState::Title;
-        }
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
-        return;
-    }
+    case FlowState::Controls:
+        if (confirmPressed || cancelPressed) m_flowState = FlowState::Title;
+        SyncDebugSnapshot(dbg);
+        return true;
 
-    if (m_flowState == FlowState::Paused) {
-        // ---- Pause Menu ----
-        const int itemCount = 4; // Resume / Restart / Quit to Title / Quit Game
-
+    case FlowState::Paused: {
+        const int itemCount = 4;
         if (upPressed)   m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount;
         if (downPressed) m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount;
 
         if (confirmPressed) {
-            if (m_pauseMenuIndex == 0) {          // Resume
+            if (m_pauseMenuIndex == 0) {
                 m_flowState = FlowState::Playing;
-            } else if (m_pauseMenuIndex == 1) {   // Restart
+            } else if (m_pauseMenuIndex == 1) {
                 RestartGame();
                 m_flowState = FlowState::Playing;
-            } else if (m_pauseMenuIndex == 2) {   // Quit to Title
-                RestartGame(); // reset the world so Title is clean next time
+            } else if (m_pauseMenuIndex == 2) {
+                RestartGame();
                 m_flowState = FlowState::Title;
-            } else {                               // Quit Game
-                m_quitMenuIndex = 0;               // default to "No"
+            } else {
+                m_quitMenuIndex = 0;
                 m_quitReturnState = FlowState::Paused;
                 m_flowState = FlowState::QuitConfirm;
             }
         }
 
-        if (cancelPressed) {
-            m_flowState = FlowState::Playing;
-        }
+        if (cancelPressed) m_flowState = FlowState::Playing;
 
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
-        return;
+        SyncDebugSnapshot(dbg);
+        return true;
     }
 
-    if (m_flowState == FlowState::QuitConfirm) {
-        // ---- Quit Confirm ----
-        const int itemCount = 2; // No / Yes
-
-        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % itemCount;
-
+    case FlowState::QuitConfirm:
+        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % 2;
         if (confirmPressed) {
-            if (m_quitMenuIndex == 0) {           // No
-                m_flowState = m_quitReturnState;
-            } else {                               // Yes
-                m_requestQuit = true;
-            }
+            if (m_quitMenuIndex == 0) m_flowState = m_quitReturnState;
+            else m_requestQuit = true;
         }
+        if (cancelPressed) m_flowState = m_quitReturnState;
 
-        if (cancelPressed) {
-            m_flowState = m_quitReturnState;
-        }
+        SyncDebugSnapshot(dbg);
+        return true;
 
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
-        return;
-    }
-if (m_flowState == FlowState::Win) {
-        // Win: Confirm goes next level, Restart restarts, Cancel quits
+    case FlowState::Win:
         if (confirmPressed) {
-            m_currentLevel++;
-            if (m_currentLevel > 10) m_currentLevel = 1;
-
+            ++m_currentLevel;
             GenerateProceduralLevel(m_currentLevel);
             ValidateAndSanitizeMap();
             UpdateWorldSizeFromMap();
-
             RestartGame();
             m_flowState = FlowState::Playing;
         }
-
-        if (restartPressed) {
+        else if (restartPressed) {
             RestartGame();
             m_flowState = FlowState::Playing;
         }
+        if (cancelPressed) m_requestQuit = true;
 
-        if (cancelPressed) {
-            m_requestQuit = true;
-        }
+        SyncDebugSnapshot(dbg);
+        return true;
 
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
-        return;
-    }
-
-
-	if (m_flowState == FlowState::Lose) {
-        // Lose: Restart restarts, Cancel quits, Confirm also restarts (feels nice for controllers later)
+    case FlowState::Lose:
         if (confirmPressed || restartPressed) {
             RestartGame();
             m_flowState = FlowState::Playing;
         }
+        if (cancelPressed) m_requestQuit = true;
 
-        if (cancelPressed) {
-            m_requestQuit = true;
+        SyncDebugSnapshot(dbg);
+        return true;
+
+    case FlowState::Playing:
+    default:
+        break;
+    }
+
+    if (cancelPressed) {
+        m_flowState = FlowState::Paused;
+        SyncDebugSnapshot(dbg);
+        return true;
+    }
+
+    return false;
+}
+
+void Game::UpdateRuntimeTimers(float fixedDt) {
+    auto tickToZero = [fixedDt](float& value) {
+        if (value > 0.0f) {
+            value -= fixedDt;
+            if (value < 0.0f) value = 0.0f;
+        }
+    };
+
+    tickToZero(m_speedBuffTimer);
+    tickToZero(m_shieldTimer);
+    tickToZero(m_toastTimer);
+    tickToZero(m_damageFlashTimer);
+    tickToZero(m_stunCooldownTimer);
+    tickToZero(m_stunPulseTimer);
+
+    for (Entity& e : m_entities) {
+        if (!e.active) continue;
+        tickToZero(e.stunTimer);
+    }
+}
+
+void Game::UpdatePlayer(Entity& player, const Input& input, float fixedDt) {
+    player.prevPos = player.pos;
+
+    if (player.hitstun <= 0.0f) {
+        Vec2 move{ 0.0f, 0.0f };
+        if (input.Down(Action::Up)) move.y -= 1.0f;
+        if (input.Down(Action::Down)) move.y += 1.0f;
+        if (input.Down(Action::Left)) move.x -= 1.0f;
+        if (input.Down(Action::Right)) move.x += 1.0f;
+
+        float lenSq = move.x * move.x + move.y * move.y;
+        if (lenSq > 0.0001f) {
+            float invLen = 1.0f / std::sqrt(lenSq);
+            move.x *= invLen;
+            move.y *= invLen;
         }
 
-        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-        dbg.cameraPos = m_camera.Position();
+        Vec2 desired = move * m_playerMoveSpeed;
+        const float accel = 18.0f;
+        player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
+    }
+
+    player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
+    player.pos = player.pos + player.vel * fixedDt;
+
+    ClampPlayerToWorld(player);
+    m_map.ResolveCircleCollision(player.pos, player.radius);
+}
+
+void Game::UpdateEnemies(const Entity& player, float fixedDt) {
+    for (Entity& e : m_entities) {
+        if (!e.active || e.type != EntityType::Enemy) continue;
+        if (e.stunTimer > 0.0f) continue;
+
+        e.prevPos = e.pos;
+
+        if (e.stunTimer > 0.0f) {
+            e.vel = { 0.0f, 0.0f };
+            continue;
+        }
+
+        Vec2 toPlayer = player.pos - e.pos;
+        float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
+        float aggroSq = e.aggroRadius * e.aggroRadius;
+
+        if (e.ai == AIState::Idle && distSq <= aggroSq) e.ai = AIState::Seek;
+        else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) e.ai = AIState::Idle;
+
+        if (e.ai != AIState::Seek || distSq <= 0.0001f) continue;
+
+        const float repathInterval = 0.25f;
+        const float waypointReach = 8.0f;
+        const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
+
+        TileCoord goalT = m_map.WorldToTile(player.pos);
+        e.path.repathTimer -= fixedDt;
+
+        bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
+        bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
+
+        if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
+            TileCoord startT = m_map.WorldToTile(e.pos);
+            auto tiles = Pathfinding::AStar(m_map, startT, goalT);
+
+            e.path.waypoints.clear();
+            e.path.index = 0;
+
+            for (const TileCoord& tile : tiles) {
+                e.path.waypoints.push_back(m_map.TileToWorldCenter(tile.x, tile.y));
+            }
+            if (e.path.waypoints.size() > 1) {
+                e.path.index = 1;
+            }
+
+            e.path.repathTimer = repathInterval;
+            e.path.lastGoalTX = goalT.x;
+            e.path.lastGoalTY = goalT.y;
+        }
+
+        if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+            Vec2 target = e.path.waypoints[e.path.index];
+            Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
+
+            float pathDistSq = to.x * to.x + to.y * to.y;
+            if (pathDistSq < waypointReach * waypointReach) {
+                e.path.index++;
+            }
+            else if (pathDistSq > 0.0001f) {
+                float invLen = 1.0f / std::sqrt(pathDistSq);
+                Vec2 dir{ to.x * invLen, to.y * invLen };
+
+                e.pos = Vec2{
+                    e.pos.x + dir.x * (enemySpeed * fixedDt),
+                    e.pos.y + dir.y * (enemySpeed * fixedDt)
+                };
+            }
+        }
+
+        m_map.ResolveCircleCollision(e.pos, e.radius);
+    }
+}
+
+void Game::ResolveEnemySeparation() {
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        if (!m_entities[i].active || m_entities[i].type != EntityType::Enemy) continue;
+
+        for (size_t j = i + 1; j < m_entities.size(); ++j) {
+            if (!m_entities[j].active || m_entities[j].type != EntityType::Enemy) continue;
+            SeparateEntities(m_entities[i], m_entities[j]);
+        }
+    }
+}
+
+void Game::ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg) {
+    (void)fixedDt;
+
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        if ((int)i == m_playerIndex) continue;
+
+        Entity& e = m_entities[i];
+        if (!e.active || e.type != EntityType::Enemy) continue;
+
+        if (CheckCollision(player, e)) {
+            SeparateEntities(player, e);
+
+            if (player.invulnTimer <= 0.0f) {
+                player.health -= 1;
+                m_damageFlashTimer = m_damageFlashDuration;
+                m_toastText = "HIT!";
+                m_toastTimer = m_toastDuration;
+                player.invulnTimer = m_iframesSeconds;
+                player.hitstun = m_hitstunSeconds;
+
+                Vec2 d = player.pos - e.pos;
+                float distSq = d.x * d.x + d.y * d.y;
+                if (distSq < 0.0001f) distSq = 0.0001f;
+                float invLen = 1.0f / std::sqrt(distSq);
+                Vec2 n{ d.x * invLen, d.y * invLen };
+
+                player.vel = player.vel + n * m_knockbackStrength;
+
+                m_shakeDuration = 0.20f;
+                m_shakeTime = m_shakeDuration;
+                m_shakeStrength = dbg.shakeStrength;
+            }
+
+            ClampPlayerToWorld(player);
+            m_map.ResolveCircleCollision(player.pos, player.radius);
+        }
+    }
+}
+
+void Game::HandlePickupCollisions(Entity& player) {
+    for (Entity& e : m_entities) {
+        if (!e.active || e.type != EntityType::Pickup) continue;
+        if (!CheckCollision(player, e)) continue;
+
+        e.active = false;
+
+        switch (e.pickupKind) {
+        case PickupKind::Token:
+            m_tokensCollected += 1;
+            m_toastText = "+TOKEN";
+            m_toastTimer = m_toastDuration;
+            if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
+            m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
+            if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
+                m_flowState = FlowState::Win;
+            }
+            break;
+
+        case PickupKind::Health:
+            if (player.health < m_playerMaxHealth) {
+                player.health += 1;
+                m_toastText = "+HEALTH";
+            }
+            else {
+                m_toastText = "HEALTH FULL";
+            }
+            m_toastTimer = m_toastDuration;
+            break;
+
+        case PickupKind::Speed:
+            m_speedBuffTimer = m_speedBuffDuration;
+            m_toastText = "+SPEED";
+            m_toastTimer = m_toastDuration;
+            break;
+
+        case PickupKind::Shield:
+            m_shieldTimer = m_shieldDuration;
+            m_toastText = "+SHIELD";
+            m_toastTimer = m_toastDuration;
+            break;
+
+        default:
+            break;
+        }
+    }
+}
+
+bool Game::RenderFlowScreen(SdlPlatform& platform) const {
+    switch (m_flowState) {
+    case FlowState::Title: {
+        const char* items[] = { "START", "CONTROLS", "QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "MINI ENGINE",
+            items, 3, m_titleMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Quit");
+        return true;
+    }
+
+    case FlowState::Controls:
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "CONTROLS",
+            "WASD: Move   TAB: Debug UI",
+            "ENTER/ESC: Back");
+        return true;
+
+    case FlowState::Paused: {
+        const char* items[] = { "RESUME", "RESTART LEVEL", "QUIT TO TITLE", "QUIT GAME" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "PAUSED",
+            items, 4, m_pauseMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Resume");
+        return true;
+    }
+
+    case FlowState::QuitConfirm: {
+        const char* items[] = { "NO", "YES - QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "QUIT GAME?",
+            items, 2, m_quitMenuIndex,
+            "W/S: Change   ENTER: Select",
+            "ESC: Back");
+        return true;
+    }
+
+    case FlowState::Win:
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU WIN!",
+            "ENTER: Next Level",
+            "ESC: Quit   R: Restart Level");
+        return true;
+
+    case FlowState::Lose:
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU LOSE!",
+            "ENTER/R: Restart Level",
+            "ESC: Quit");
+        return true;
+
+    case FlowState::Playing:
+    default:
+        return false;
+    }
+}
+
+
+void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
+    if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size()) {
+        SyncDebugSnapshot(dbg);
         return;
     }
 
+    auto tickCombatTimers = [fixedDt](Entity& e) {
+        if (e.hitstun > 0.0f) {
+            e.hitstun -= fixedDt;
+            if (e.hitstun < 0.0f) e.hitstun = 0.0f;
+        }
+        if (e.invulnTimer > 0.0f) {
+            e.invulnTimer -= fixedDt;
+            if (e.invulnTimer < 0.0f) e.invulnTimer = 0.0f;
+        }
+    };
+
+    for (Entity& e : m_entities) {
+        if (!e.active) continue;
+        tickCombatTimers(e);
+    }
+
+    if (UpdateFlowScreens(input, dbg)) {
+        return;
+    }
+
+    Entity& player = m_entities[m_playerIndex];
+
+    // Hot reload
+    m_cfgPollTimer += fixedDt;
+    if (m_cfgPollTimer >= 1.0f) {
+        m_cfgPollTimer = 0.0f;
+        try {
+            auto t = std::filesystem::last_write_time("assets/config.json");
+            if (t != m_cfgTimestamp) {
+                m_cfgTimestamp = t;
+                ReloadConfig("assets/config.json");
+                std::printf("[HOTRELOAD] config.json reloaded\n");
+            }
+        }
+        catch (...) {}
+    }
+
+    if (dbg.requestReloadConfig) {
+        dbg.requestReloadConfig = false;
+        ReloadConfig("assets/config.json");
+    }
+
+    if (input.Pressed(Action::ToggleDebug) && !dbg.imguiWantsKeyboard) {
+        dbg.showUI = !dbg.showUI;
+    }
+
+    if (dbg.pause) {
+        SyncDebugSnapshot(dbg);
+        return;
+    }
+
+    if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
+    if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
+    if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
+    if (dbg.invulnSeconds > 3.0f) dbg.invulnSeconds = 3.0f;
+    if (dbg.hitKnockback < 0.0f) dbg.hitKnockback = 0.0f;
+    if (dbg.hitKnockback > 2000.0f) dbg.hitKnockback = 2000.0f;
+
+    m_playerMaxHealth = dbg.playerMaxHealth;
+    m_invulnSeconds = dbg.invulnSeconds;
+    m_hitKnockback = dbg.hitKnockback;
+
+    if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
+    player.invulnDuration = m_invulnSeconds;
+
+    if (dbg.zoom < 0.5f) dbg.zoom = 0.5f;
+    if (dbg.zoom > 2.0f) dbg.zoom = 2.0f;
+    m_camera.SetZoom(dbg.zoom);
+
+    UpdateRuntimeTimers(fixedDt);
+    UpdatePlayer(player, input, fixedDt);
+
+    if (input.Pressed(Action::Stun) && m_stunCooldownTimer <= 0.0f) {
+        m_stunCooldownTimer = m_stunCooldown;
+        m_stunPulseTimer = m_stunPulseDuration;
+        m_toastText = "STUN!";
+        m_toastTimer = m_toastDuration;
+
+        const float stunRadiusSq = m_stunRadius * m_stunRadius;
+        for (Entity& e : m_entities) {
+            if (!e.active || e.type != EntityType::Enemy) continue;
+
+            Vec2 d = e.pos - player.pos;
+            float distSq = d.x * d.x + d.y * d.y;
+            if (distSq > stunRadiusSq) continue;
+
+            float stunDuration = m_stunDuration;
+            if (e.enemyKind == EnemyKind::Tank) {
+                stunDuration *= 0.6f;
+            }
+            e.stunTimer = std::max(e.stunTimer, stunDuration);
+            e.path.waypoints.clear();
+            e.path.index = 0;
+            e.path.repathTimer = 0.0f;
+            e.vel = { 0.0f, 0.0f };
+        }
+    }
+    UpdateEnemies(player, fixedDt);
+    ResolveEnemySeparation();
+    ResolvePlayerEnemyCollisions(player, fixedDt, dbg);
+    HandlePickupCollisions(player);
 
-	// Playing: Esc pauses
-	if (cancelPressed) {
-		m_flowState = FlowState::Paused;
-		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
-
-// HOT-RELOAD POLLING (runs even if paused)
-	// --------------------
-	m_cfgPollTimer += fixedDt;
-	if (m_cfgPollTimer >= 1.0f) {
-		m_cfgPollTimer = 0.0f;
-		try {
-			auto t = std::filesystem::last_write_time(AssetPath("assets/config.json"));
-			if (t != m_cfgTimestamp) {
-				m_cfgTimestamp = t;
-				ReloadConfig(AssetPath("assets/config.json").c_str());
-				std::printf("[HOTRELOAD] config.json reloaded\n");
-			}
-		}
-		catch (...) {}
-	}
-
-	// --------------------
-	// MANUAL RELOAD (ImGui button)
-	// --------------------
-	if (dbg.requestReloadConfig) {
-		dbg.requestReloadConfig = false;
-		ReloadConfig(AssetPath("assets/config.json").c_str());
-	}
-
-	// --------------------
-	// Toggle debug UI with Tab (edge-triggered)
-	// --------------------
-	// Toggle debug UI (Tab) - action based so it only flips once per press.
-	if (debugPressed) {
-		if (!dbg.imguiWantsKeyboard) {
-			dbg.showUI = !dbg.showUI;
-		}
-	}
-
-
-	// --------------------
-	// PAUSE HANDLING
-	// --------------------
-	if (dbg.pause) {
-		dbg.entityCount = (int)m_entities.size();
-		dbg.playerPos = m_entities[m_playerIndex].pos;
-		dbg.cameraPos = m_camera.Position();
-		return;
-	}
-
-
-	// --------------------
-	// Combat tuning (from debug UI)
-	// --------------------
-	if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
-	if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
-	if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
-	if (dbg.invulnSeconds > 3.0f) dbg.invulnSeconds = 3.0f;
-	if (dbg.hitKnockback < 0.0f) dbg.hitKnockback = 0.0f;
-	if (dbg.hitKnockback > 2000.0f) dbg.hitKnockback = 2000.0f;
-
-	m_playerMaxHealth = dbg.playerMaxHealth;
-	m_invulnSeconds = dbg.invulnSeconds;
-	m_hitKnockback = dbg.hitKnockback;
-
-	// Keep player state sane if tuning changed at runtime
-	if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
-	player.invulnDuration = m_invulnSeconds;
-
-	if (player.invulnTimer > 0.0f) {
-		player.invulnTimer -= fixedDt;
-		if (player.invulnTimer < 0.0f) player.invulnTimer = 0.0f;
-	}
-
-	// --------------------
-	// Apply zoom from UI
-	// --------------------
-	if (dbg.zoom < 0.5f) dbg.zoom = 0.5f;
-	if (dbg.zoom > 2.0f) dbg.zoom = 2.0f;
-	m_camera.SetZoom(dbg.zoom);
-
-	// --------------------
-	
-	// --------------------
-	// Power-up timers
-	// --------------------
-	if (m_speedBuffTimer > 0.0f) {
-		m_speedBuffTimer -= fixedDt;
-		if (m_speedBuffTimer < 0.0f) m_speedBuffTimer = 0.0f;
-	}
-	if (m_shieldTimer > 0.0f) {
-		m_shieldTimer -= fixedDt;
-		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
-	}
-	if (m_stunCooldownTimer > 0.0f) {
-		m_stunCooldownTimer -= fixedDt;
-		if (m_stunCooldownTimer < 0.0f) m_stunCooldownTimer = 0.0f;
-	}
-	if (m_stunPulseTimer > 0.0f) {
-		m_stunPulseTimer -= fixedDt;
-		if (m_stunPulseTimer < 0.0f) m_stunPulseTimer = 0.0f;
-	}
-
-	// --------------------
-	// HUD feedback timers (toast + damage flash)
-	// --------------------
-	if (m_toastTimer > 0.0f) {
-		m_toastTimer -= fixedDt;
-		if (m_toastTimer < 0.0f) m_toastTimer = 0.0f;
-	}
-	if (m_damageFlashTimer > 0.0f) {
-		m_damageFlashTimer -= fixedDt;
-		if (m_damageFlashTimer < 0.0f) m_damageFlashTimer = 0.0f;
-	}
-
-
-// INPUT SYSTEM (player)
-	// --------------------
-	player.prevPos = player.pos;
-
-	if (player.hitstun <= 0.0f) {
-		Vec2 move{ 0,0 };
-		if (input.Down(Action::Up)) move.y -= 1.0f;
-		if (input.Down(Action::Down)) move.y += 1.0f;
-		if (input.Down(Action::Left)) move.x -= 1.0f;
-		if (input.Down(Action::Right)) move.x += 1.0f;
-
-		// normalize if moving diagonally
-		float lenSq = move.x * move.x + move.y * move.y;
-		if (lenSq > 0.0001f) {
-			float invLen = 1.0f / std::sqrt(lenSq);
-			move.x *= invLen; move.y *= invLen;
-		}
-
-		// desired velocity from input
-		Vec2 desired = move * m_playerMoveSpeed;
-
-		// blend toward desired (keeps knockback snappy but controllable)
-		const float accel = 18.0f;
-		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
-	}
-
-
-// Player utility move: short-range stun pulse.
-if (stunPressed && m_stunCooldownTimer <= 0.0f) {
-	m_stunCooldownTimer = m_stunCooldown;
-	m_stunPulseTimer = m_stunPulseDuration;
-	m_toastText = "STUN USED";
-	m_toastTimer = m_toastDuration;
-
-	for (Entity& e : m_entities) {
-		if (!e.active || e.type != EntityType::Enemy) continue;
-		Vec2 d = e.pos - player.pos;
-		float distSq = d.x * d.x + d.y * d.y;
-		if (distSq <= m_stunRadius * m_stunRadius) {
-			float stunScale = (e.enemyKind == EnemyKind::Tank) ? 0.65f : 1.0f;
-			e.stunTimer = std::max(e.stunTimer, m_stunDuration * stunScale);
-			e.path.waypoints.clear();
-			e.path.index = 0;
-			e.path.repathTimer = 0.0f;
-			e.vel = { 0.0f, 0.0f };
-		}
-	}
-}
-
-	// knockback damping (always runs)
-	player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
-
-	player.pos = player.pos + player.vel * fixedDt;
-
-	// keep existing
-	ClampPlayerToWorld(player);
-	m_map.ResolveCircleCollision(player.pos, player.radius);
-
-	// --------------------
-	// AI SYSTEM (Idle -> Seek)
-	// --------------------
-
-	for (size_t i = 0; i < m_entities.size(); ++i) {
-		Entity& e = m_entities[i];
-		if (e.type != EntityType::Enemy) continue;
-
-		e.prevPos = e.pos;
-		if (e.stunTimer > 0.0f) {
-			e.stunTimer -= fixedDt;
-			if (e.stunTimer < 0.0f) e.stunTimer = 0.0f;
-			e.vel = { 0.0f, 0.0f };
-			continue;
-		}
-
-		Vec2 toPlayer = player.pos - e.pos;
-		float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
-		float aggroSq = e.aggroRadius * e.aggroRadius;
-
-		// State transitions
-		if (e.ai == AIState::Idle && distSq <= aggroSq) {
-			e.ai = AIState::Seek;
-		}
-		else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) {
-			// hysteresis so it doesn't flicker
-			e.ai = AIState::Idle;
-		}
-
-		// Behavior
-		if (e.ai == AIState::Seek && distSq > 0.0001f) {
-			const float repathInterval = 0.25f;  // 4x/sec
-			const float waypointReach = 8.0f;
-			const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
-
-			TileCoord goalT = m_map.WorldToTile(player.pos);
-
-			// timers
-			e.path.repathTimer -= fixedDt;
-
-			// repath conditions
-			bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
-			bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
-
-			if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
-				TileCoord startT = m_map.WorldToTile(e.pos);
-
-				auto tiles = Pathfinding::AStar(m_map, startT, goalT);
-				e.path.waypoints.clear();
-				e.path.index = 0;
-
-				for (size_t j = 0; j < tiles.size(); ++j) {
-					Vec2 wp = m_map.TileToWorldCenter(tiles[j].x, tiles[j].y);
-					e.path.waypoints.push_back(wp);
-				}
-				if (e.path.waypoints.size() > 1) {
-					e.path.index = 1; // skip start tile center
-				}
-
-				e.path.repathTimer = repathInterval;
-				e.path.lastGoalTX = goalT.x;
-				e.path.lastGoalTY = goalT.y;
-			}
-
-			// Follow path
-			if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
-				Vec2 target = e.path.waypoints[e.path.index];
-				Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
-
-				float distSq2 = to.x * to.x + to.y * to.y;
-				if (distSq2 < waypointReach * waypointReach) {
-					e.path.index++;
-				}
-				else if (distSq2 > 0.0001f) {
-					float invLen = 1.0f / std::sqrt(distSq2);
-					Vec2 dir{ to.x * invLen, to.y * invLen };
-
-					e.pos = Vec2{
-						e.pos.x + dir.x * (enemySpeed * fixedDt),
-						e.pos.y + dir.y * (enemySpeed * fixedDt)
-					};
-				}
-			}
-
-			// Wall collision (keep from sliding through)
-			m_map.ResolveCircleCollision(e.pos, e.radius);
-		}
-
-	}
-
-
-	// --------------------
-	// SEPARATION SYSTEM (enemy vs enemy)
-	// --------------------
-	for (size_t i = 0; i < m_entities.size(); ++i) {
-		if (m_entities[i].type != EntityType::Enemy) continue;
-
-		for (size_t j = i + 1; j < m_entities.size(); ++j) {
-			if (m_entities[j].type != EntityType::Enemy) continue;
-
-			SeparateEntities(m_entities[i], m_entities[j]);
-		}
-	}
-
-	// --------------------
-	// COLLISION SYSTEM (player vs enemies)
-	// --------------------
-	for (size_t i = 0; i < m_entities.size(); ++i) {
-		if ((int)i == m_playerIndex) continue;
-
-		Entity& e = m_entities[i];
-		if (e.type != EntityType::Enemy) continue;
-		if (e.stunTimer > 0.0f) continue;
-
-		if (CheckCollision(player, e)) {
-			// Separate both bodies to avoid "sticky" overlap.
-			SeparateEntities(player, e);
-
-			// Compute a stable hit normal (from enemy -> player).
-			Vec2 d = player.pos - e.pos;
-			float distSq = d.x * d.x + d.y * d.y;
-			float dist = std::sqrt(std::max(distSq, 0.0001f));
-			Vec2 n = d * (1.0f / dist);
-
-			// DAMAGE (only if not invulnerable)
-			if (player.invulnTimer <= 0.0f) {
-				player.health -= 1;
-				m_damageFlashTimer = m_damageFlashDuration;
-				m_toastText = "HIT!";
-				m_toastTimer = m_toastDuration;
-				player.invulnTimer = m_iframesSeconds;
-				player.hitstun = m_hitstunSeconds;
-
-				// knockback direction: enemy -> player
-				d = player.pos - e.pos;
-				distSq = d.x * d.x + d.y * d.y;
-				if (distSq < 0.0001f) distSq = 0.0001f;
-				float invLen = 1.0f / std::sqrt(distSq);
-				Vec2 n1{ d.x * invLen, d.y * invLen };
-
-				// impulse
-				player.vel = player.vel + n1 * m_knockbackStrength;
-
-				// Camera shake
-				m_shakeDuration = 0.20f;
-				m_shakeTime = m_shakeDuration;
-				m_shakeStrength = dbg.shakeStrength;
-				
-			}
-
-			// Keep player valid after collision pushes
-			ClampPlayerToWorld(player);
-			m_map.ResolveCircleCollision(player.pos, player.radius);
-		}
-
-
-	}
-
-	// --------------------
-	// --------------------
-	// PICKUPS (player vs pickups)
-	// --------------------
-	for (Entity& e : m_entities) {
-		if (!e.active) continue;
-		if (e.type != EntityType::Pickup) continue;
-
-		if (!CheckCollision(player, e)) continue;
-
-		e.active = false;
-
-		switch (e.pickupKind) {
-		case PickupKind::Token:
-			m_tokensCollected += 1;
-			m_toastText = "+TOKEN";
-			m_toastTimer = m_toastDuration;
-			if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
-			m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
-			if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
-				m_flowState = FlowState::Win;
-			}
-			break;
-		case PickupKind::Health:
-			// +1 heart (clamped)
-			if (player.health < m_playerMaxHealth) {
-				player.health += 1;
-				m_toastText = "+HEALTH";
-			} else {
-				m_toastText = "HEALTH FULL";
-			}
-			m_toastTimer = m_toastDuration;
-			break;
-		case PickupKind::Speed:
-			// Temporary movement boost
-			m_speedBuffTimer = m_speedBuffDuration;
-			m_toastText = "+SPEED";
-			m_toastTimer = m_toastDuration;
-			break;
-		case PickupKind::Shield:
-			// One-hit protection (timer also useful for UI)
-			m_shieldTimer = m_shieldDuration;
-			m_toastText = "+SHIELD";
-			m_toastTimer = m_toastDuration;
-			break;
-		default:
-			break;
-		}
-	}
-
-if (player.health <= 0) {
-		m_flowState = FlowState::Lose;
-	}
-
-	// --------------------
-	// CAMERA SYSTEM (follow + clamp)
-	// --------------------
-	UpdateCameraFollow(platform, player);
-
-	// --------------------
-	// CAMERA SHAKE (Step 3)
-	// --------------------
-	Vec2 shake{ 0.0f, 0.0f };
-	if (m_shakeTime > 0.0f) {
-		m_shakeTime -= fixedDt;
-		if (m_shakeTime < 0.0f) m_shakeTime = 0.0f;
-
-		const float t = (m_shakeDuration - m_shakeTime) * 60.0f;
-		const float sx = std::sin(t * 12.9898f) * 43758.5453f;
-		const float sy = std::sin(t * 78.233f) * 12345.6789f;
-
-		auto frac = [](float v) { return v - std::floor(v); };
-		float nx = frac(sx) * 2.0f - 1.0f;
-		float ny = frac(sy) * 2.0f - 1.0f;
-
-		float fade = (m_shakeDuration > 0.0f) ? (m_shakeTime / m_shakeDuration) : 0.0f;
-		shake = Vec2{ nx, ny } * (m_shakeStrength * fade);
-	}
-	m_camera.SetShakeOffset(shake);
-
-	// --------------------
-	// DEBUG OUTPUT (for UI)
-	// --------------------
-	dbg.entityCount = (int)m_entities.size();
-	dbg.enemyCount = std::max(0, dbg.entityCount - 1);
-	dbg.playerPos = player.pos;
-	dbg.cameraPos = m_camera.Position();
-	dbg.playerHealth = player.health;
-	dbg.gameOver = m_gameOver;
-	dbg.debugEntityCount = 0;
-	for (const Entity& e : m_entities) {
-		if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
-		auto& row = dbg.debugEntities[dbg.debugEntityCount++];
-
-		row.id = e.id;
-		if (e.type == EntityType::Player) row.type = 0;
-		else if (e.type == EntityType::Enemy) row.type = 1;
-		else if (e.type == EntityType::Pickup) row.type = 2;
-		else row.type = 3;
-		row.x = e.pos.x;
-		row.y = e.pos.y;
-		row.radius = e.radius;
-		row.ai = (e.type == EntityType::Enemy && e.ai == AIState::Seek) ? 1 : 0;
-	}
+    if (player.health <= 0) {
+        m_flowState = FlowState::Lose;
+    }
+
+    UpdateCameraFollow(platform, player);
+
+    Vec2 shake{ 0.0f, 0.0f };
+    if (m_shakeTime > 0.0f) {
+        m_shakeTime -= fixedDt;
+        if (m_shakeTime < 0.0f) m_shakeTime = 0.0f;
+
+        const float t = (m_shakeDuration - m_shakeTime) * 60.0f;
+        const float sx = std::sin(t * 12.9898f) * 43758.5453f;
+        const float sy = std::sin(t * 78.233f) * 12345.6789f;
+
+        auto frac = [](float v) { return v - std::floor(v); };
+        float nx = frac(sx) * 2.0f - 1.0f;
+        float ny = frac(sy) * 2.0f - 1.0f;
+
+        float fade = (m_shakeDuration > 0.0f) ? (m_shakeTime / m_shakeDuration) : 0.0f;
+        shake = Vec2{ nx, ny } * (m_shakeStrength * fade);
+    }
+    m_camera.SetShakeOffset(shake);
+
+    SyncDebugSnapshot(dbg);
 }
 
 void Game::DrawWorldGrid(SdlPlatform& platform) const {
@@ -919,249 +864,98 @@ void Game::DrawWorldGrid(SdlPlatform& platform) const {
 	}
 }
 
+
 void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
-	// Render() owns drawing for flow screens. Update() owns state transitions.
-	if (m_flowState == FlowState::Title) {
-        const char* items[] = { "START", "CONTROLS", "QUIT" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "MINI ENGINE",
-            items, 3, m_titleMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
-            "ESC: Quit"
-        );
+    if (RenderFlowScreen(platform)) {
         return;
     }
 
-    if (m_flowState == FlowState::Controls) {
-        // Simple controls page (keep it readable, no fancy layout yet)
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "CONTROLS",
-            "WASD: Move   SPACE: Stun",
-            "TAB: Debug UI   ENTER/ESC: Back"
-        );
+    if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size() || m_requestQuit) {
         return;
     }
 
-    if (m_flowState == FlowState::Paused) {
-        const char* items[] = { "RESUME", "RESTART LEVEL", "QUIT TO TITLE", "QUIT GAME" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "PAUSED",
-            items, 4, m_pauseMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
-            "ESC: Resume"
-        );
-        return;
+    const Entity& player = m_entities[m_playerIndex];
+    const auto& playerTex = m_assets.Player();
+
+    if (dbg.showGrid) {
+        DrawWorldGrid(platform);
     }
 
-    if (m_flowState == FlowState::QuitConfirm) {
-        const char* items[] = { "NO", "YES - QUIT" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "QUIT GAME?",
-            items, 2, m_quitMenuIndex,
-            "W/S: Change   ENTER: Select",
-            "ESC: Back"
-        );
-        return;
+    m_map.Render(platform, m_camera);
+
+    if (m_stunPulseTimer > 0.0f) {
+        const float pulseT = 1.0f - (m_stunPulseTimer / std::max(0.001f, m_stunPulseDuration));
+        const float ringA = 20.0f + (m_stunRadius * pulseT);
+        const float ringB = 10.0f + (m_stunRadius * std::min(1.0f, pulseT + 0.2f));
+        DrawPulseDots(platform, m_camera, player.pos, ringA, 6, 80, 220, 255);
+        DrawPulseDots(platform, m_camera, player.pos, ringB, 4, 180, 240, 255);
     }
 
-    if (m_flowState == FlowState::Win) {
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "YOU WIN!",
-            "ENTER: Next Level",
-            "ESC: Quit   R: Restart Level"
-        );
-        return;
+    for (const Entity& e : m_entities) {
+        if (!e.active) continue;
+
+        const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
+        const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
+
+        if (e.type == EntityType::Player) {
+            if (e.invulnTimer > 0.0f) {
+                const int phase = (int)(e.invulnTimer * 20.0f);
+                if ((phase & 1) == 0) {
+                    continue;
+                }
+            }
+
+            const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
+            const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
+            platform.DrawSprite(playerTex, drawX, drawY);
+            continue;
+        }
+
+        if (e.type == EntityType::Pickup) {
+            Vec2 screen = m_camera.WorldToScreen(e.pos);
+            switch (e.pickupKind) {
+            case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break;
+            case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 220, 80); break;
+            case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 160, 255); break;
+            case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180, 80, 220); break;
+            default:                 platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
+            }
+            continue;
+        }
+
+        if (dbg.showPaths && e.type == EntityType::Enemy) {
+            for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
+                Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
+                Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
+                platform.DrawLine((int)a.x, (int)a.y, (int)b.x, (int)b.y);
+            }
+        }
+
+        const int size = (int)(e.radius * 2.0f);
+        const int drawX = (int)(screenPos.x - size * 0.5f);
+        const int drawY = (int)(screenPos.y - size * 0.5f);
+
+        int r = 200, g = 80, b = 80;
+        switch (e.enemyKind) {
+        case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
+        case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
+        default: break;
+        }
+
+        platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+
+        if (e.stunTimer > 0.0f) {
+            platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
+        }
     }
 
-    if (m_flowState == FlowState::Lose) {
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "YOU LOSE!",
-            "ENTER/R: Restart Level",
-            "ESC: Quit"
-        );
-        return;
+    DrawHUD(platform);
+    DrawToast(platform);
+    DrawDamageFlash(platform);
+
+    if (!m_levelValidationMsg.empty()) {
+        platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
     }
-
-if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
-		return;
-
-	if (m_requestQuit)
-		return;
-
-	const Entity& player = m_entities[m_playerIndex];
-	const auto& playerTex = m_assets.Player();
-
-	if (dbg.showGrid) {
-		DrawWorldGrid(platform);
-	}
-
-	// World (tilemap first, then entities)
-	m_map.Render(platform, m_camera);
-
-	for (const Entity& e : m_entities) {
-		if (!e.active) continue;
-		const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
-		const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
-
-		if (e.type == EntityType::Player) {
-			// Blink while invulnerable
-			if (e.invulnTimer > 0.0f) {
-				const int phase = (int)(e.invulnTimer * 20.0f);
-				if ((phase & 1) == 0) {
-					continue;
-				}
-			}
-
-			const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
-			const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
-			platform.DrawSprite(playerTex, drawX, drawY);
-		}
-		else if (e.type == EntityType::Pickup) {
-			Vec2 screen = m_camera.WorldToScreen(e.pos);
-			// Color by pickup kind
-			switch (e.pickupKind) {
-			case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break; // yellow
-			case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 220, 80); break; // green
-			case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 160, 255); break; // blue
-			case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180,  80, 220); break; // purple
-			default:                platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
-			}
-		}
-		else {
-			if (dbg.showPaths && e.type == EntityType::Enemy) {
-				for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
-					Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
-					Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
-					platform.DrawLine((int)a.x, (int)a.y, (int)b.x, (int)b.y);
-				}
-			}
-
-			const int size = (int)(e.radius * 2.0f);
-			const int drawX = (int)(screenPos.x - size * 0.5f);
-			const int drawY = (int)(screenPos.y - size * 0.5f);
-			int r = 200, g = 80, b = 80; // chaser default
-			switch (e.enemyKind) {
-			case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
-			case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
-			default: break;
-			}
-			platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
-			if (e.stunTimer > 0.0f) {
-				platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
-			}
-		}
-	}
-
-
-
-
-// Stun pulse visual so the player can read the ability clearly.
-if (m_stunPulseTimer > 0.0f) {
-	const float t = 1.0f - (m_stunPulseTimer / m_stunPulseDuration);
-	const float radius = std::max(8.0f, m_stunRadius * t);
-	DrawPulseDots(platform, m_camera, player.pos, radius, 6, 80, 220, 255);
-}
-
-	// --------------------
-	// HUD (screen-space)
-	// --------------------
-	const int maxH = std::max(1, dbg.playerMaxHealth);
-	const int curH = std::max(0, std::min(player.health, maxH));
-
-	int x = 16, y = 16;
-	for (int i = 0; i < curH; ++i) {
-		platform.DrawFilledRect(x + i * 22, y, 18, 18, 220, 60, 60);
-	}
-	for (int i = curH; i < maxH; ++i) {
-		platform.DrawFilledRect(x + i * 22, y, 18, 18, 60, 60, 60);
-	}
-
-	// Tokens row (below hearts)
-	// Shows collected (yellow) and remaining (gray) tokens.
-	const int tokenSize = 18;     // same as hearts
-	const int tokenStep = 22;     // same spacing as hearts
-	const int tokenX = 16;
-	const int tokenY = 16 + tokenStep; // one row below hearts
-
-	const int totalTokens = std::max(0, m_tokensTotal);
-	const int collected = std::max(0, std::min(m_tokensCollected, totalTokens));
-
-	for (int i = 0; i < totalTokens; ++i) {
-		if (i < collected) {
-			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
-		} else {
-			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 60, 60, 60);
-		}
-	}
-
-	// Buff indicators (same size as hearts/tokens)
-	const int buffY = tokenY + tokenStep;
-	// Speed
-	if (m_speedBuffTimer > 0.0f) platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 80, 160, 255);
-	else                         platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 40, 40, 40);
-	// Shield
-	if (m_shieldTimer > 0.0f)    platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 180, 80, 220);
-	else                         platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 40, 40, 40);
-
-	if (m_flowState == FlowState::QuitConfirm) {
-		int w = 0, h = 0;
-		platform.GetWindowSize(w, h);
-
-		// Dim background
-		platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
-
-		// Center box
-		const int bw = 560;
-		const int bh = 120;
-		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 40, 40, 40);
-
-		// Two hint bars (no text renderer yet)
-		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 20, 380, 24, 70, 70, 70);   // "Quit? Enter"
-		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 60, 380, 24, 70, 70, 70);   // "Esc to cancel"
-		return;
-		}
-
-// --------------------
-	// Game Over overlay (no text renderer yet)
-	// --------------------
-	if (m_gameOver) {
-		int w = 0, h = 0;
-		platform.GetWindowSize(w, h);
-
-		// Dim background
-		platform.DrawFilledRect(0, 0, w, h, 20, 20, 20);
-
-		// Big red banner
-		const int bw = 520;
-		const int bh = 90;
-		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 180, 40, 40);
-
-		// "Press R" hint bar
-		const int hw = 320;
-		const int hh = 22;
-		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
-	}
-	if (m_gameWin) {
-		int w = 0, h = 0;
-		platform.GetWindowSize(w, h);
-
-		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha
-		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
-	}
-
-
-	// --------------------
-	// HUD + feedback (only during gameplay)
-	// --------------------
-	DrawHUD(platform);
-	DrawToast(platform);
-	DrawDamageFlash(platform);
-
-
-	// If the map had issues, show a small hint so you notice immediately.
-	if (!m_levelValidationMsg.empty()) {
-		platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
-	}
 }
 
 // --------------------
