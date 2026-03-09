@@ -41,10 +41,6 @@ public:
     // Platform updates keys with the current snapshot.
     void SetKey(Key k, bool isDown);
 
-    // Call after the first fixed-step update in a rendered frame so Pressed/Released do not
-    // repeat when the game needs to catch up with multiple simulation steps.
-    void ConsumeTransient();
-
     // Raw key queries
     bool Down(Key k) const;
     bool Pressed(Key k) const;

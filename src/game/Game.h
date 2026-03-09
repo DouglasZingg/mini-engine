@@ -35,20 +35,11 @@ private:
     bool GenerateProceduralLevel(int levelIndex);
     void DrawWorldGrid(SdlPlatform& platform) const;
     void RestartGame();
-    void SyncDebugSnapshot(DebugState& dbg) const;
-    bool UpdateFlowScreens(const Input& input, DebugState& dbg);
-    void UpdateRuntimeTimers(float fixedDt);
-    void UpdatePlayer(Entity& player, const Input& input, float fixedDt);
-    void UpdateEnemies(const Entity& player, float fixedDt);
-    void ResolveEnemySeparation();
-    void ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg);
-    void HandlePickupCollisions(Entity& player);
 
     // HUD + quick feedback
     void DrawHUD(SdlPlatform& platform) const;
     void DrawToast(SdlPlatform& platform) const;
     void DrawDamageFlash(SdlPlatform& platform) const;
-    bool RenderFlowScreen(SdlPlatform& platform) const;
 
 private:
     Assets     m_assets;

@@ -8,10 +8,6 @@ void Input::SetKey(Key k, bool isDown) {
     m_curr[(size_t)k] = isDown;
 }
 
-void Input::ConsumeTransient() {
-    m_prev = m_curr;
-}
-
 bool Input::Down(Key k) const {
     return m_curr[(size_t)k];
 }

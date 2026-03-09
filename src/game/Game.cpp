@@ -135,6 +135,31 @@ static void DrawPulseDots(SdlPlatform& platform, const Camera2D& camera, const V
     }
 }
 
+
+static bool FindPatrolGoalNearEnemy(const Tilemap& map, const Entity& enemy, int minRadiusTiles, int maxRadiusTiles, int attemptSeed, TileCoord& outGoal) {
+    const TileCoord origin = map.WorldToTile(enemy.pos);
+
+    std::mt19937 rng((uint32_t)(enemy.id * 9781u + attemptSeed * 131u + origin.x * 17 + origin.y * 31));
+    std::uniform_int_distribution<int> distOffset(-maxRadiusTiles, maxRadiusTiles);
+
+    for (int attempt = 0; attempt < 18; ++attempt) {
+        const int ox = distOffset(rng);
+        const int oy = distOffset(rng);
+        const int manhattan = std::abs(ox) + std::abs(oy);
+        if (manhattan < minRadiusTiles || manhattan > maxRadiusTiles) continue;
+
+        const int tx = origin.x + ox;
+        const int ty = origin.y + oy;
+        if (tx <= 0 || ty <= 0 || tx >= map.Width() - 1 || ty >= map.Height() - 1) continue;
+        if (map.IsSolidTile(tx, ty)) continue;
+
+        outGoal = TileCoord{ tx, ty };
+        return true;
+    }
+
+    return false;
+}
+
 static bool IsWalkableProcTile(int v) {
     return v != 1;
 }
@@ -269,571 +294,676 @@ void Game::UpdateCameraFollow(SdlPlatform& platform, const Entity& player)
 }
 
 
+void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
+	Entity& player = m_entities[m_playerIndex];
 
-void Game::SyncDebugSnapshot(DebugState& dbg) const {
-    dbg.entityCount = (int)m_entities.size();
+	auto TickCombatTimers = [&](Entity& e) {
+		if (e.hitstun > 0.0f) {
+			e.hitstun -= fixedDt;
+			if (e.hitstun < 0.0f) e.hitstun = 0.0f;
+		}
+		if (e.invulnTimer > 0.0f) {
+			e.invulnTimer -= fixedDt;
+			if (e.invulnTimer < 0.0f) e.invulnTimer = 0.0f;
+		}
+		};
 
-    int enemyCount = 0;
-    for (const Entity& e : m_entities) {
-        if (e.active && e.type == EntityType::Enemy) enemyCount++;
-    }
-    dbg.enemyCount = enemyCount;
+	for (Entity& e : m_entities) {
+		if (!e.active) continue;
+		TickCombatTimers(e);
+	}
 
-    if (m_playerIndex >= 0 && m_playerIndex < (int)m_entities.size()) {
-        dbg.playerPos = m_entities[m_playerIndex].pos;
-        dbg.playerHealth = m_entities[m_playerIndex].health;
-    } else {
-        dbg.playerPos = Vec2{ 0.0f, 0.0f };
-        dbg.playerHealth = 0;
-    }
+	// --------------------
+// AUTHORITATIVE FLOW INPUT (edge-triggered)
+// --------------------
+// All flow/menu screens use action presses (not held) so a key doesn't repeat every tick.
+const bool upPressed      = input.Pressed(Action::Up);
+const bool downPressed    = input.Pressed(Action::Down);
+const bool leftPressed    = input.Pressed(Action::Left);
+const bool rightPressed   = input.Pressed(Action::Right);
+const bool confirmPressed = input.Pressed(Action::Confirm);
+const bool cancelPressed  = input.Pressed(Action::Cancel);
+const bool restartPressed = input.Pressed(Action::Restart);
+const bool debugPressed   = input.Pressed(Action::ToggleDebug);
+const bool stunPressed    = input.Pressed(Action::Stun);
+// Keep legacy flags in sync for any old render paths
+	m_gameWin = (m_flowState == FlowState::Win);
+	m_gameOver = (m_flowState == FlowState::Lose);
 
-    dbg.cameraPos = m_camera.Position();
-    dbg.gameOver = (m_flowState == FlowState::Lose);
+	// --------------------
+	// FLOW STATE HANDLING
+	// --------------------
+	// Update() owns state transitions only. Render() owns drawing for these screens.
+	if (m_flowState == FlowState::Title) {
+        // ---- Title Menu ----
+        const int itemCount = 3; // Start / Controls / Quit
 
-    dbg.debugEntityCount = 0;
-    for (const Entity& e : m_entities) {
-        if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
-        auto& row = dbg.debugEntities[dbg.debugEntityCount++];
-
-        row.id = e.id;
-        if (e.type == EntityType::Player) row.type = 0;
-        else if (e.type == EntityType::Enemy) row.type = 1;
-        else if (e.type == EntityType::Pickup) row.type = 2;
-        else row.type = 3;
-
-        row.x = e.pos.x;
-        row.y = e.pos.y;
-        row.radius = e.radius;
-        row.ai = (e.type == EntityType::Enemy && e.ai == AIState::Seek) ? 1 : 0;
-    }
-}
-
-bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
-    const bool upPressed = input.Pressed(Action::Up);
-    const bool downPressed = input.Pressed(Action::Down);
-    const bool confirmPressed = input.Pressed(Action::Confirm);
-    const bool cancelPressed = input.Pressed(Action::Cancel);
-    const bool restartPressed = input.Pressed(Action::Restart);
-
-    m_gameWin = (m_flowState == FlowState::Win);
-    m_gameOver = (m_flowState == FlowState::Lose);
-
-    switch (m_flowState) {
-    case FlowState::Title: {
-        const int itemCount = 3;
         if (upPressed)   m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount;
         if (downPressed) m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount;
 
         if (confirmPressed) {
-            if (m_titleMenuIndex == 0) m_flowState = FlowState::Playing;
-            else if (m_titleMenuIndex == 1) m_flowState = FlowState::Controls;
-            else m_requestQuit = true;
+            if (m_titleMenuIndex == 0) {          // Start
+                m_currentLevel = 1;
+                GenerateProceduralLevel(m_currentLevel);
+                ValidateAndSanitizeMap();
+                UpdateWorldSizeFromMap();
+                RestartGame();
+                m_flowState = FlowState::Playing;
+            } else if (m_titleMenuIndex == 1) {   // Controls
+                m_flowState = FlowState::Controls;
+            } else {                               // Quit
+                m_requestQuit = true;
+            }
         }
-        if (cancelPressed) m_requestQuit = true;
 
-        SyncDebugSnapshot(dbg);
-        return true;
+        if (cancelPressed) {
+            m_requestQuit = true;
+        }
+
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
     }
 
-    case FlowState::Controls:
-        if (confirmPressed || cancelPressed) m_flowState = FlowState::Title;
-        SyncDebugSnapshot(dbg);
-        return true;
+    if (m_flowState == FlowState::Controls) {
+        // Any confirm/cancel goes back to title.
+        if (confirmPressed || cancelPressed) {
+            m_flowState = FlowState::Title;
+        }
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
 
-    case FlowState::Paused: {
-        const int itemCount = 4;
+    if (m_flowState == FlowState::Paused) {
+        // ---- Pause Menu ----
+        const int itemCount = 4; // Resume / Restart / Quit to Title / Quit Game
+
         if (upPressed)   m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount;
         if (downPressed) m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount;
 
         if (confirmPressed) {
-            if (m_pauseMenuIndex == 0) {
+            if (m_pauseMenuIndex == 0) {          // Resume
                 m_flowState = FlowState::Playing;
-            } else if (m_pauseMenuIndex == 1) {
+            } else if (m_pauseMenuIndex == 1) {   // Restart
                 RestartGame();
                 m_flowState = FlowState::Playing;
-            } else if (m_pauseMenuIndex == 2) {
-                RestartGame();
+            } else if (m_pauseMenuIndex == 2) {   // Quit to Title
+                RestartGame(); // reset the world so Title is clean next time
                 m_flowState = FlowState::Title;
-            } else {
-                m_quitMenuIndex = 0;
+            } else {                               // Quit Game
+                m_quitMenuIndex = 0;               // default to "No"
                 m_quitReturnState = FlowState::Paused;
                 m_flowState = FlowState::QuitConfirm;
             }
         }
 
-        if (cancelPressed) m_flowState = FlowState::Playing;
+        if (cancelPressed) {
+            m_flowState = FlowState::Playing;
+        }
 
-        SyncDebugSnapshot(dbg);
-        return true;
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
     }
 
-    case FlowState::QuitConfirm:
-        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % 2;
+    if (m_flowState == FlowState::QuitConfirm) {
+        // ---- Quit Confirm ----
+        const int itemCount = 2; // No / Yes
+
+        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % itemCount;
+
         if (confirmPressed) {
-            if (m_quitMenuIndex == 0) m_flowState = m_quitReturnState;
-            else m_requestQuit = true;
+            if (m_quitMenuIndex == 0) {           // No
+                m_flowState = m_quitReturnState;
+            } else {                               // Yes
+                m_requestQuit = true;
+            }
         }
-        if (cancelPressed) m_flowState = m_quitReturnState;
 
-        SyncDebugSnapshot(dbg);
-        return true;
+        if (cancelPressed) {
+            m_flowState = m_quitReturnState;
+        }
 
-    case FlowState::Win:
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+if (m_flowState == FlowState::Win) {
+        // Win: Confirm goes next level, Restart restarts, Cancel quits
         if (confirmPressed) {
-            ++m_currentLevel;
+            m_currentLevel++;
+            if (m_currentLevel > 10) m_currentLevel = 1;
+
             GenerateProceduralLevel(m_currentLevel);
             ValidateAndSanitizeMap();
             UpdateWorldSizeFromMap();
+
             RestartGame();
             m_flowState = FlowState::Playing;
         }
-        else if (restartPressed) {
+
+        if (restartPressed) {
             RestartGame();
             m_flowState = FlowState::Playing;
         }
-        if (cancelPressed) m_requestQuit = true;
 
-        SyncDebugSnapshot(dbg);
-        return true;
+        if (cancelPressed) {
+            m_requestQuit = true;
+        }
 
-    case FlowState::Lose:
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
+        return;
+    }
+
+
+	if (m_flowState == FlowState::Lose) {
+        // Lose: Restart restarts, Cancel quits, Confirm also restarts (feels nice for controllers later)
         if (confirmPressed || restartPressed) {
             RestartGame();
             m_flowState = FlowState::Playing;
         }
-        if (cancelPressed) m_requestQuit = true;
 
-        SyncDebugSnapshot(dbg);
-        return true;
-
-    case FlowState::Playing:
-    default:
-        break;
-    }
-
-    if (cancelPressed) {
-        m_flowState = FlowState::Paused;
-        SyncDebugSnapshot(dbg);
-        return true;
-    }
-
-    return false;
-}
-
-void Game::UpdateRuntimeTimers(float fixedDt) {
-    auto tickToZero = [fixedDt](float& value) {
-        if (value > 0.0f) {
-            value -= fixedDt;
-            if (value < 0.0f) value = 0.0f;
-        }
-    };
-
-    tickToZero(m_speedBuffTimer);
-    tickToZero(m_shieldTimer);
-    tickToZero(m_toastTimer);
-    tickToZero(m_damageFlashTimer);
-    tickToZero(m_stunCooldownTimer);
-    tickToZero(m_stunPulseTimer);
-
-    for (Entity& e : m_entities) {
-        if (!e.active) continue;
-        tickToZero(e.stunTimer);
-    }
-}
-
-void Game::UpdatePlayer(Entity& player, const Input& input, float fixedDt) {
-    player.prevPos = player.pos;
-
-    if (player.hitstun <= 0.0f) {
-        Vec2 move{ 0.0f, 0.0f };
-        if (input.Down(Action::Up)) move.y -= 1.0f;
-        if (input.Down(Action::Down)) move.y += 1.0f;
-        if (input.Down(Action::Left)) move.x -= 1.0f;
-        if (input.Down(Action::Right)) move.x += 1.0f;
-
-        float lenSq = move.x * move.x + move.y * move.y;
-        if (lenSq > 0.0001f) {
-            float invLen = 1.0f / std::sqrt(lenSq);
-            move.x *= invLen;
-            move.y *= invLen;
+        if (cancelPressed) {
+            m_requestQuit = true;
         }
 
-        Vec2 desired = move * m_playerMoveSpeed;
-        const float accel = 18.0f;
-        player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
-    }
-
-    player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
-    player.pos = player.pos + player.vel * fixedDt;
-
-    ClampPlayerToWorld(player);
-    m_map.ResolveCircleCollision(player.pos, player.radius);
-}
-
-void Game::UpdateEnemies(const Entity& player, float fixedDt) {
-    for (Entity& e : m_entities) {
-        if (!e.active || e.type != EntityType::Enemy) continue;
-        if (e.stunTimer > 0.0f) continue;
-
-        e.prevPos = e.pos;
-
-        if (e.stunTimer > 0.0f) {
-            e.vel = { 0.0f, 0.0f };
-            continue;
-        }
-
-        Vec2 toPlayer = player.pos - e.pos;
-        float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
-        float aggroSq = e.aggroRadius * e.aggroRadius;
-
-        if (e.ai == AIState::Idle && distSq <= aggroSq) e.ai = AIState::Seek;
-        else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) e.ai = AIState::Idle;
-
-        if (e.ai != AIState::Seek || distSq <= 0.0001f) continue;
-
-        const float repathInterval = 0.25f;
-        const float waypointReach = 8.0f;
-        const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
-
-        TileCoord goalT = m_map.WorldToTile(player.pos);
-        e.path.repathTimer -= fixedDt;
-
-        bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
-        bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
-
-        if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
-            TileCoord startT = m_map.WorldToTile(e.pos);
-            auto tiles = Pathfinding::AStar(m_map, startT, goalT);
-
-            e.path.waypoints.clear();
-            e.path.index = 0;
-
-            for (const TileCoord& tile : tiles) {
-                e.path.waypoints.push_back(m_map.TileToWorldCenter(tile.x, tile.y));
-            }
-            if (e.path.waypoints.size() > 1) {
-                e.path.index = 1;
-            }
-
-            e.path.repathTimer = repathInterval;
-            e.path.lastGoalTX = goalT.x;
-            e.path.lastGoalTY = goalT.y;
-        }
-
-        if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
-            Vec2 target = e.path.waypoints[e.path.index];
-            Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
-
-            float pathDistSq = to.x * to.x + to.y * to.y;
-            if (pathDistSq < waypointReach * waypointReach) {
-                e.path.index++;
-            }
-            else if (pathDistSq > 0.0001f) {
-                float invLen = 1.0f / std::sqrt(pathDistSq);
-                Vec2 dir{ to.x * invLen, to.y * invLen };
-
-                e.pos = Vec2{
-                    e.pos.x + dir.x * (enemySpeed * fixedDt),
-                    e.pos.y + dir.y * (enemySpeed * fixedDt)
-                };
-            }
-        }
-
-        m_map.ResolveCircleCollision(e.pos, e.radius);
-    }
-}
-
-void Game::ResolveEnemySeparation() {
-    for (size_t i = 0; i < m_entities.size(); ++i) {
-        if (!m_entities[i].active || m_entities[i].type != EntityType::Enemy) continue;
-
-        for (size_t j = i + 1; j < m_entities.size(); ++j) {
-            if (!m_entities[j].active || m_entities[j].type != EntityType::Enemy) continue;
-            SeparateEntities(m_entities[i], m_entities[j]);
-        }
-    }
-}
-
-void Game::ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg) {
-    (void)fixedDt;
-
-    for (size_t i = 0; i < m_entities.size(); ++i) {
-        if ((int)i == m_playerIndex) continue;
-
-        Entity& e = m_entities[i];
-        if (!e.active || e.type != EntityType::Enemy) continue;
-
-        if (CheckCollision(player, e)) {
-            SeparateEntities(player, e);
-
-            if (player.invulnTimer <= 0.0f) {
-                player.health -= 1;
-                m_damageFlashTimer = m_damageFlashDuration;
-                m_toastText = "HIT!";
-                m_toastTimer = m_toastDuration;
-                player.invulnTimer = m_iframesSeconds;
-                player.hitstun = m_hitstunSeconds;
-
-                Vec2 d = player.pos - e.pos;
-                float distSq = d.x * d.x + d.y * d.y;
-                if (distSq < 0.0001f) distSq = 0.0001f;
-                float invLen = 1.0f / std::sqrt(distSq);
-                Vec2 n{ d.x * invLen, d.y * invLen };
-
-                player.vel = player.vel + n * m_knockbackStrength;
-
-                m_shakeDuration = 0.20f;
-                m_shakeTime = m_shakeDuration;
-                m_shakeStrength = dbg.shakeStrength;
-            }
-
-            ClampPlayerToWorld(player);
-            m_map.ResolveCircleCollision(player.pos, player.radius);
-        }
-    }
-}
-
-void Game::HandlePickupCollisions(Entity& player) {
-    for (Entity& e : m_entities) {
-        if (!e.active || e.type != EntityType::Pickup) continue;
-        if (!CheckCollision(player, e)) continue;
-
-        e.active = false;
-
-        switch (e.pickupKind) {
-        case PickupKind::Token:
-            m_tokensCollected += 1;
-            m_toastText = "+TOKEN";
-            m_toastTimer = m_toastDuration;
-            if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
-            m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
-            if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
-                m_flowState = FlowState::Win;
-            }
-            break;
-
-        case PickupKind::Health:
-            if (player.health < m_playerMaxHealth) {
-                player.health += 1;
-                m_toastText = "+HEALTH";
-            }
-            else {
-                m_toastText = "HEALTH FULL";
-            }
-            m_toastTimer = m_toastDuration;
-            break;
-
-        case PickupKind::Speed:
-            m_speedBuffTimer = m_speedBuffDuration;
-            m_toastText = "+SPEED";
-            m_toastTimer = m_toastDuration;
-            break;
-
-        case PickupKind::Shield:
-            m_shieldTimer = m_shieldDuration;
-            m_toastText = "+SHIELD";
-            m_toastTimer = m_toastDuration;
-            break;
-
-        default:
-            break;
-        }
-    }
-}
-
-bool Game::RenderFlowScreen(SdlPlatform& platform) const {
-    switch (m_flowState) {
-    case FlowState::Title: {
-        const char* items[] = { "START", "CONTROLS", "QUIT" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "MINI ENGINE",
-            items, 3, m_titleMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
-            "ESC: Quit");
-        return true;
-    }
-
-    case FlowState::Controls:
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "CONTROLS",
-            "WASD: Move   TAB: Debug UI",
-            "ENTER/ESC: Back");
-        return true;
-
-    case FlowState::Paused: {
-        const char* items[] = { "RESUME", "RESTART LEVEL", "QUIT TO TITLE", "QUIT GAME" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "PAUSED",
-            items, 4, m_pauseMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
-            "ESC: Resume");
-        return true;
-    }
-
-    case FlowState::QuitConfirm: {
-        const char* items[] = { "NO", "YES - QUIT" };
-        DrawMenuOverlay(platform, m_assets.Font(),
-            "QUIT GAME?",
-            items, 2, m_quitMenuIndex,
-            "W/S: Change   ENTER: Select",
-            "ESC: Back");
-        return true;
-    }
-
-    case FlowState::Win:
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "YOU WIN!",
-            "ENTER: Next Level",
-            "ESC: Quit   R: Restart Level");
-        return true;
-
-    case FlowState::Lose:
-        DrawCenteredOverlay(platform, m_assets.Font(),
-            "YOU LOSE!",
-            "ENTER/R: Restart Level",
-            "ESC: Quit");
-        return true;
-
-    case FlowState::Playing:
-    default:
-        return false;
-    }
-}
-
-
-void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, DebugState& dbg) {
-    if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size()) {
-        SyncDebugSnapshot(dbg);
+        dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+        dbg.cameraPos = m_camera.Position();
         return;
     }
 
-    auto tickCombatTimers = [fixedDt](Entity& e) {
-        if (e.hitstun > 0.0f) {
-            e.hitstun -= fixedDt;
-            if (e.hitstun < 0.0f) e.hitstun = 0.0f;
-        }
-        if (e.invulnTimer > 0.0f) {
-            e.invulnTimer -= fixedDt;
-            if (e.invulnTimer < 0.0f) e.invulnTimer = 0.0f;
-        }
-    };
 
-    for (Entity& e : m_entities) {
-        if (!e.active) continue;
-        tickCombatTimers(e);
-    }
+	// Playing: Esc pauses
+	if (cancelPressed) {
+		m_flowState = FlowState::Paused;
+		dbg.playerPos = (m_playerIndex >= 0) ? m_entities[m_playerIndex].pos : Vec2{0,0};
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
 
-    if (UpdateFlowScreens(input, dbg)) {
-        return;
-    }
+// HOT-RELOAD POLLING (runs even if paused)
+	// --------------------
+	m_cfgPollTimer += fixedDt;
+	if (m_cfgPollTimer >= 1.0f) {
+		m_cfgPollTimer = 0.0f;
+		try {
+			auto t = std::filesystem::last_write_time(AssetPath("assets/config.json"));
+			if (t != m_cfgTimestamp) {
+				m_cfgTimestamp = t;
+				ReloadConfig(AssetPath("assets/config.json").c_str());
+				std::printf("[HOTRELOAD] config.json reloaded\n");
+			}
+		}
+		catch (...) {}
+	}
 
-    Entity& player = m_entities[m_playerIndex];
+	// --------------------
+	// MANUAL RELOAD (ImGui button)
+	// --------------------
+	if (dbg.requestReloadConfig) {
+		dbg.requestReloadConfig = false;
+		ReloadConfig(AssetPath("assets/config.json").c_str());
+	}
 
-    // Hot reload
-    m_cfgPollTimer += fixedDt;
-    if (m_cfgPollTimer >= 1.0f) {
-        m_cfgPollTimer = 0.0f;
-        try {
-            auto t = std::filesystem::last_write_time("assets/config.json");
-            if (t != m_cfgTimestamp) {
-                m_cfgTimestamp = t;
-                ReloadConfig("assets/config.json");
-                std::printf("[HOTRELOAD] config.json reloaded\n");
-            }
-        }
-        catch (...) {}
-    }
+	// --------------------
+	// Toggle debug UI with Tab (edge-triggered)
+	// --------------------
+	// Toggle debug UI (Tab) - action based so it only flips once per press.
+	if (debugPressed) {
+		if (!dbg.imguiWantsKeyboard) {
+			dbg.showUI = !dbg.showUI;
+		}
+	}
 
-    if (dbg.requestReloadConfig) {
-        dbg.requestReloadConfig = false;
-        ReloadConfig("assets/config.json");
-    }
 
-    if (input.Pressed(Action::ToggleDebug) && !dbg.imguiWantsKeyboard) {
-        dbg.showUI = !dbg.showUI;
-    }
+	// --------------------
+	// PAUSE HANDLING
+	// --------------------
+	if (dbg.pause) {
+		dbg.entityCount = (int)m_entities.size();
+		dbg.playerPos = m_entities[m_playerIndex].pos;
+		dbg.cameraPos = m_camera.Position();
+		return;
+	}
 
-    if (dbg.pause) {
-        SyncDebugSnapshot(dbg);
-        return;
-    }
 
-    if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
-    if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
-    if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
-    if (dbg.invulnSeconds > 3.0f) dbg.invulnSeconds = 3.0f;
-    if (dbg.hitKnockback < 0.0f) dbg.hitKnockback = 0.0f;
-    if (dbg.hitKnockback > 2000.0f) dbg.hitKnockback = 2000.0f;
+	// --------------------
+	// Combat tuning (from debug UI)
+	// --------------------
+	if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
+	if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
+	if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
+	if (dbg.invulnSeconds > 3.0f) dbg.invulnSeconds = 3.0f;
+	if (dbg.hitKnockback < 0.0f) dbg.hitKnockback = 0.0f;
+	if (dbg.hitKnockback > 2000.0f) dbg.hitKnockback = 2000.0f;
 
-    m_playerMaxHealth = dbg.playerMaxHealth;
-    m_invulnSeconds = dbg.invulnSeconds;
-    m_hitKnockback = dbg.hitKnockback;
+	m_playerMaxHealth = dbg.playerMaxHealth;
+	m_invulnSeconds = dbg.invulnSeconds;
+	m_hitKnockback = dbg.hitKnockback;
 
-    if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
-    player.invulnDuration = m_invulnSeconds;
+	// Keep player state sane if tuning changed at runtime
+	if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
+	player.invulnDuration = m_invulnSeconds;
 
-    if (dbg.zoom < 0.5f) dbg.zoom = 0.5f;
-    if (dbg.zoom > 2.0f) dbg.zoom = 2.0f;
-    m_camera.SetZoom(dbg.zoom);
+	if (player.invulnTimer > 0.0f) {
+		player.invulnTimer -= fixedDt;
+		if (player.invulnTimer < 0.0f) player.invulnTimer = 0.0f;
+	}
 
-    UpdateRuntimeTimers(fixedDt);
-    UpdatePlayer(player, input, fixedDt);
+	// --------------------
+	// Apply zoom from UI
+	// --------------------
+	if (dbg.zoom < 0.5f) dbg.zoom = 0.5f;
+	if (dbg.zoom > 2.0f) dbg.zoom = 2.0f;
+	m_camera.SetZoom(dbg.zoom);
 
-    if (input.Pressed(Action::Stun) && m_stunCooldownTimer <= 0.0f) {
-        m_stunCooldownTimer = m_stunCooldown;
-        m_stunPulseTimer = m_stunPulseDuration;
-        m_toastText = "STUN!";
-        m_toastTimer = m_toastDuration;
+	// --------------------
+	
+	// --------------------
+	// Power-up timers
+	// --------------------
+	if (m_speedBuffTimer > 0.0f) {
+		m_speedBuffTimer -= fixedDt;
+		if (m_speedBuffTimer < 0.0f) m_speedBuffTimer = 0.0f;
+	}
+	if (m_shieldTimer > 0.0f) {
+		m_shieldTimer -= fixedDt;
+		if (m_shieldTimer < 0.0f) m_shieldTimer = 0.0f;
+	}
+	if (m_stunCooldownTimer > 0.0f) {
+		m_stunCooldownTimer -= fixedDt;
+		if (m_stunCooldownTimer < 0.0f) m_stunCooldownTimer = 0.0f;
+	}
+	if (m_stunPulseTimer > 0.0f) {
+		m_stunPulseTimer -= fixedDt;
+		if (m_stunPulseTimer < 0.0f) m_stunPulseTimer = 0.0f;
+	}
 
-        const float stunRadiusSq = m_stunRadius * m_stunRadius;
-        for (Entity& e : m_entities) {
-            if (!e.active || e.type != EntityType::Enemy) continue;
+	// --------------------
+	// HUD feedback timers (toast + damage flash)
+	// --------------------
+	if (m_toastTimer > 0.0f) {
+		m_toastTimer -= fixedDt;
+		if (m_toastTimer < 0.0f) m_toastTimer = 0.0f;
+	}
+	if (m_damageFlashTimer > 0.0f) {
+		m_damageFlashTimer -= fixedDt;
+		if (m_damageFlashTimer < 0.0f) m_damageFlashTimer = 0.0f;
+	}
 
-            Vec2 d = e.pos - player.pos;
-            float distSq = d.x * d.x + d.y * d.y;
-            if (distSq > stunRadiusSq) continue;
 
-            float stunDuration = m_stunDuration;
-            if (e.enemyKind == EnemyKind::Tank) {
-                stunDuration *= 0.6f;
-            }
-            e.stunTimer = std::max(e.stunTimer, stunDuration);
-            e.path.waypoints.clear();
-            e.path.index = 0;
-            e.path.repathTimer = 0.0f;
-            e.vel = { 0.0f, 0.0f };
-        }
-    }
-    UpdateEnemies(player, fixedDt);
-    ResolveEnemySeparation();
-    ResolvePlayerEnemyCollisions(player, fixedDt, dbg);
-    HandlePickupCollisions(player);
+// INPUT SYSTEM (player)
+	// --------------------
+	player.prevPos = player.pos;
 
-    if (player.health <= 0) {
-        m_flowState = FlowState::Lose;
-    }
+	if (player.hitstun <= 0.0f) {
+		Vec2 move{ 0,0 };
+		if (input.Down(Action::Up)) move.y -= 1.0f;
+		if (input.Down(Action::Down)) move.y += 1.0f;
+		if (input.Down(Action::Left)) move.x -= 1.0f;
+		if (input.Down(Action::Right)) move.x += 1.0f;
 
-    UpdateCameraFollow(platform, player);
+		// normalize if moving diagonally
+		float lenSq = move.x * move.x + move.y * move.y;
+		if (lenSq > 0.0001f) {
+			float invLen = 1.0f / std::sqrt(lenSq);
+			move.x *= invLen; move.y *= invLen;
+		}
 
-    Vec2 shake{ 0.0f, 0.0f };
-    if (m_shakeTime > 0.0f) {
-        m_shakeTime -= fixedDt;
-        if (m_shakeTime < 0.0f) m_shakeTime = 0.0f;
+		// desired velocity from input
+		Vec2 desired = move * m_playerMoveSpeed;
 
-        const float t = (m_shakeDuration - m_shakeTime) * 60.0f;
-        const float sx = std::sin(t * 12.9898f) * 43758.5453f;
-        const float sy = std::sin(t * 78.233f) * 12345.6789f;
+		// blend toward desired (keeps knockback snappy but controllable)
+		const float accel = 18.0f;
+		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
+	}
 
-        auto frac = [](float v) { return v - std::floor(v); };
-        float nx = frac(sx) * 2.0f - 1.0f;
-        float ny = frac(sy) * 2.0f - 1.0f;
 
-        float fade = (m_shakeDuration > 0.0f) ? (m_shakeTime / m_shakeDuration) : 0.0f;
-        shake = Vec2{ nx, ny } * (m_shakeStrength * fade);
-    }
-    m_camera.SetShakeOffset(shake);
+// Player utility move: short-range stun pulse.
+if (stunPressed && m_stunCooldownTimer <= 0.0f) {
+	m_stunCooldownTimer = m_stunCooldown;
+	m_stunPulseTimer = m_stunPulseDuration;
+	m_toastText = "STUN USED";
+	m_toastTimer = m_toastDuration;
 
-    SyncDebugSnapshot(dbg);
+	for (Entity& e : m_entities) {
+		if (!e.active || e.type != EntityType::Enemy) continue;
+		Vec2 d = e.pos - player.pos;
+		float distSq = d.x * d.x + d.y * d.y;
+		if (distSq <= m_stunRadius * m_stunRadius) {
+			float stunScale = (e.enemyKind == EnemyKind::Tank) ? 0.65f : 1.0f;
+			e.stunTimer = std::max(e.stunTimer, m_stunDuration * stunScale);
+			e.path.waypoints.clear();
+			e.path.index = 0;
+			e.path.repathTimer = 0.0f;
+			e.vel = { 0.0f, 0.0f };
+		}
+	}
+}
+
+	// knockback damping (always runs)
+	player.vel = player.vel * (1.0f / (1.0f + m_knockbackDamping * fixedDt));
+
+	player.pos = player.pos + player.vel * fixedDt;
+
+	// keep existing
+	ClampPlayerToWorld(player);
+	m_map.ResolveCircleCollision(player.pos, player.radius);
+
+	
+// --------------------
+// AI SYSTEM (Idle patrol -> Seek)
+// --------------------
+
+for (size_t i = 0; i < m_entities.size(); ++i) {
+	Entity& e = m_entities[i];
+	if (e.type != EntityType::Enemy) continue;
+
+	e.prevPos = e.pos;
+	if (e.stunTimer > 0.0f) {
+		e.stunTimer -= fixedDt;
+		if (e.stunTimer < 0.0f) e.stunTimer = 0.0f;
+		e.vel = { 0.0f, 0.0f };
+		continue;
+	}
+
+	Vec2 toPlayer = player.pos - e.pos;
+	float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
+	float aggroSq = e.aggroRadius * e.aggroRadius;
+
+	if (e.ai == AIState::Idle && distSq <= aggroSq) {
+		e.ai = AIState::Seek;
+		e.path.waypoints.clear();
+		e.path.index = 0;
+		e.path.repathTimer = 0.0f;
+	}
+	else if (e.ai == AIState::Seek && distSq > aggroSq * 1.35f) {
+		e.ai = AIState::Idle;
+		e.path.waypoints.clear();
+		e.path.index = 0;
+		e.path.repathTimer = 0.0f;
+	}
+
+	const float baseSpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
+	const float waypointReach = 8.0f;
+
+	if (e.ai == AIState::Seek) {
+		const float repathInterval =
+			(e.enemyKind == EnemyKind::Fast) ? 0.18f :
+			(e.enemyKind == EnemyKind::Tank) ? 0.40f : 0.28f;
+
+		e.path.repathTimer -= fixedDt;
+		TileCoord goalT = m_map.WorldToTile(player.pos);
+		bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
+		bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
+
+		// At very close range just move directly instead of over-pathing.
+		if (distSq <= 110.0f * 110.0f) {
+			if (distSq > 0.0001f) {
+				float invLen = 1.0f / std::sqrt(distSq);
+				Vec2 dir{ toPlayer.x * invLen, toPlayer.y * invLen };
+				e.pos = Vec2{
+					e.pos.x + dir.x * (baseSpeed * fixedDt),
+					e.pos.y + dir.y * (baseSpeed * fixedDt)
+				};
+			}
+		}
+		else {
+			if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
+				TileCoord startT = m_map.WorldToTile(e.pos);
+				auto tiles = Pathfinding::AStar(m_map, startT, goalT);
+				e.path.waypoints.clear();
+				e.path.index = 0;
+
+				for (size_t j = 0; j < tiles.size(); ++j) {
+					e.path.waypoints.push_back(m_map.TileToWorldCenter(tiles[j].x, tiles[j].y));
+				}
+				if (e.path.waypoints.size() > 1) {
+					e.path.index = 1;
+				}
+
+				const float jitter = (float)((e.id % 5u) * 0.03f);
+				e.path.repathTimer = repathInterval + jitter;
+				e.path.lastGoalTX = goalT.x;
+				e.path.lastGoalTY = goalT.y;
+			}
+
+			if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+				Vec2 target = e.path.waypoints[e.path.index];
+				Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
+				float distSq2 = to.x * to.x + to.y * to.y;
+				if (distSq2 < waypointReach * waypointReach) {
+					e.path.index++;
+				}
+				else if (distSq2 > 0.0001f) {
+					float invLen = 1.0f / std::sqrt(distSq2);
+					Vec2 dir{ to.x * invLen, to.y * invLen };
+					e.pos = Vec2{
+						e.pos.x + dir.x * (baseSpeed * fixedDt),
+						e.pos.y + dir.y * (baseSpeed * fixedDt)
+					};
+				}
+			}
+		}
+	}
+	else {
+		// Idle state becomes a light patrol / wander so the level feels alive.
+		e.path.repathTimer -= fixedDt;
+		bool needPatrolPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
+		if (e.path.repathTimer <= 0.0f || needPatrolPath) {
+			TileCoord patrolGoal{};
+			if (FindPatrolGoalNearEnemy(m_map, e, 3, 8, (int)(m_currentLevel * 100 + i), patrolGoal)) {
+				TileCoord startT = m_map.WorldToTile(e.pos);
+				auto tiles = Pathfinding::AStar(m_map, startT, patrolGoal);
+				e.path.waypoints.clear();
+				e.path.index = 0;
+				for (size_t j = 0; j < tiles.size(); ++j) {
+					e.path.waypoints.push_back(m_map.TileToWorldCenter(tiles[j].x, tiles[j].y));
+				}
+				if (e.path.waypoints.size() > 1) {
+					e.path.index = 1;
+				}
+			}
+			const float idlePause = 1.0f + (float)((e.id + i) % 4) * 0.25f;
+			e.path.repathTimer = idlePause;
+		}
+
+		if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+			Vec2 target = e.path.waypoints[e.path.index];
+			Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
+			float distSq2 = to.x * to.x + to.y * to.y;
+			if (distSq2 < waypointReach * waypointReach) {
+				e.path.index++;
+			}
+			else if (distSq2 > 0.0001f) {
+				float invLen = 1.0f / std::sqrt(distSq2);
+				Vec2 dir{ to.x * invLen, to.y * invLen };
+				const float patrolSpeedScale = (e.enemyKind == EnemyKind::Fast) ? 0.85f :
+					(e.enemyKind == EnemyKind::Tank) ? 0.45f : 0.60f;
+				e.pos = Vec2{
+					e.pos.x + dir.x * (baseSpeed * patrolSpeedScale * fixedDt),
+					e.pos.y + dir.y * (baseSpeed * patrolSpeedScale * fixedDt)
+				};
+			}
+		}
+	}
+
+	m_map.ResolveCircleCollision(e.pos, e.radius);
+}
+
+// --------------------
+// SEPARATION SYSTEM (enemy vs enemy)
+	// --------------------
+	for (size_t i = 0; i < m_entities.size(); ++i) {
+		if (m_entities[i].type != EntityType::Enemy) continue;
+
+		for (size_t j = i + 1; j < m_entities.size(); ++j) {
+			if (m_entities[j].type != EntityType::Enemy) continue;
+
+			SeparateEntities(m_entities[i], m_entities[j]);
+		}
+	}
+
+	// --------------------
+	// COLLISION SYSTEM (player vs enemies)
+	// --------------------
+	for (size_t i = 0; i < m_entities.size(); ++i) {
+		if ((int)i == m_playerIndex) continue;
+
+		Entity& e = m_entities[i];
+		if (e.type != EntityType::Enemy) continue;
+		if (e.stunTimer > 0.0f) continue;
+
+		if (CheckCollision(player, e)) {
+			// Separate both bodies to avoid "sticky" overlap.
+			SeparateEntities(player, e);
+
+			// Compute a stable hit normal (from enemy -> player).
+			Vec2 d = player.pos - e.pos;
+			float distSq = d.x * d.x + d.y * d.y;
+			float dist = std::sqrt(std::max(distSq, 0.0001f));
+			Vec2 n = d * (1.0f / dist);
+
+			// DAMAGE (only if not invulnerable)
+			if (player.invulnTimer <= 0.0f) {
+				player.health -= 1;
+				m_damageFlashTimer = m_damageFlashDuration;
+				m_toastText = "HIT!";
+				m_toastTimer = m_toastDuration;
+				player.invulnTimer = m_iframesSeconds;
+				player.hitstun = m_hitstunSeconds;
+
+				// knockback direction: enemy -> player
+				d = player.pos - e.pos;
+				distSq = d.x * d.x + d.y * d.y;
+				if (distSq < 0.0001f) distSq = 0.0001f;
+				float invLen = 1.0f / std::sqrt(distSq);
+				Vec2 n1{ d.x * invLen, d.y * invLen };
+
+				// impulse
+				player.vel = player.vel + n1 * m_knockbackStrength;
+
+				// Camera shake
+				m_shakeDuration = 0.20f;
+				m_shakeTime = m_shakeDuration;
+				m_shakeStrength = dbg.shakeStrength;
+				
+			}
+
+			// Keep player valid after collision pushes
+			ClampPlayerToWorld(player);
+			m_map.ResolveCircleCollision(player.pos, player.radius);
+		}
+
+
+	}
+
+	// --------------------
+	// --------------------
+	// PICKUPS (player vs pickups)
+	// --------------------
+	for (Entity& e : m_entities) {
+		if (!e.active) continue;
+		if (e.type != EntityType::Pickup) continue;
+
+		if (!CheckCollision(player, e)) continue;
+
+		e.active = false;
+
+		switch (e.pickupKind) {
+		case PickupKind::Token:
+			m_tokensCollected += 1;
+			m_toastText = "+TOKEN";
+			m_toastTimer = m_toastDuration;
+			if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
+			m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
+			if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
+				m_flowState = FlowState::Win;
+			}
+			break;
+		case PickupKind::Health:
+			// +1 heart (clamped)
+			if (player.health < m_playerMaxHealth) {
+				player.health += 1;
+				m_toastText = "+HEALTH";
+			} else {
+				m_toastText = "HEALTH FULL";
+			}
+			m_toastTimer = m_toastDuration;
+			break;
+		case PickupKind::Speed:
+			// Temporary movement boost
+			m_speedBuffTimer = m_speedBuffDuration;
+			m_toastText = "+SPEED";
+			m_toastTimer = m_toastDuration;
+			break;
+		case PickupKind::Shield:
+			// One-hit protection (timer also useful for UI)
+			m_shieldTimer = m_shieldDuration;
+			m_toastText = "+SHIELD";
+			m_toastTimer = m_toastDuration;
+			break;
+		default:
+			break;
+		}
+	}
+
+if (player.health <= 0) {
+		m_flowState = FlowState::Lose;
+	}
+
+	// --------------------
+	// CAMERA SYSTEM (follow + clamp)
+	// --------------------
+	UpdateCameraFollow(platform, player);
+
+	// --------------------
+	// CAMERA SHAKE (Step 3)
+	// --------------------
+	Vec2 shake{ 0.0f, 0.0f };
+	if (m_shakeTime > 0.0f) {
+		m_shakeTime -= fixedDt;
+		if (m_shakeTime < 0.0f) m_shakeTime = 0.0f;
+
+		const float t = (m_shakeDuration - m_shakeTime) * 60.0f;
+		const float sx = std::sin(t * 12.9898f) * 43758.5453f;
+		const float sy = std::sin(t * 78.233f) * 12345.6789f;
+
+		auto frac = [](float v) { return v - std::floor(v); };
+		float nx = frac(sx) * 2.0f - 1.0f;
+		float ny = frac(sy) * 2.0f - 1.0f;
+
+		float fade = (m_shakeDuration > 0.0f) ? (m_shakeTime / m_shakeDuration) : 0.0f;
+		shake = Vec2{ nx, ny } * (m_shakeStrength * fade);
+	}
+	m_camera.SetShakeOffset(shake);
+
+	// --------------------
+	// DEBUG OUTPUT (for UI)
+	// --------------------
+	dbg.entityCount = (int)m_entities.size();
+	dbg.enemyCount = std::max(0, dbg.entityCount - 1);
+	dbg.playerPos = player.pos;
+	dbg.cameraPos = m_camera.Position();
+	dbg.playerHealth = player.health;
+	dbg.gameOver = m_gameOver;
+	dbg.debugEntityCount = 0;
+	for (const Entity& e : m_entities) {
+		if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
+		auto& row = dbg.debugEntities[dbg.debugEntityCount++];
+
+		row.id = e.id;
+		if (e.type == EntityType::Player) row.type = 0;
+		else if (e.type == EntityType::Enemy) row.type = 1;
+		else if (e.type == EntityType::Pickup) row.type = 2;
+		else row.type = 3;
+		row.x = e.pos.x;
+		row.y = e.pos.y;
+		row.radius = e.radius;
+		row.ai = (e.type == EntityType::Enemy && e.ai == AIState::Seek) ? 1 : 0;
+	}
 }
 
 void Game::DrawWorldGrid(SdlPlatform& platform) const {
@@ -864,98 +994,249 @@ void Game::DrawWorldGrid(SdlPlatform& platform) const {
 	}
 }
 
-
 void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
-    if (RenderFlowScreen(platform)) {
+	// Render() owns drawing for flow screens. Update() owns state transitions.
+	if (m_flowState == FlowState::Title) {
+        const char* items[] = { "START", "CONTROLS", "QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "MINI ENGINE",
+            items, 3, m_titleMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Quit"
+        );
         return;
     }
 
-    if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size() || m_requestQuit) {
+    if (m_flowState == FlowState::Controls) {
+        // Simple controls page (keep it readable, no fancy layout yet)
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "CONTROLS",
+            "WASD: Move   SPACE: Stun",
+            "TAB: Debug UI   ENTER/ESC: Back"
+        );
         return;
     }
 
-    const Entity& player = m_entities[m_playerIndex];
-    const auto& playerTex = m_assets.Player();
-
-    if (dbg.showGrid) {
-        DrawWorldGrid(platform);
+    if (m_flowState == FlowState::Paused) {
+        const char* items[] = { "RESUME", "RESTART LEVEL", "QUIT TO TITLE", "QUIT GAME" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "PAUSED",
+            items, 4, m_pauseMenuIndex,
+            "W/S: Move Cursor   ENTER: Select",
+            "ESC: Resume"
+        );
+        return;
     }
 
-    m_map.Render(platform, m_camera);
-
-    if (m_stunPulseTimer > 0.0f) {
-        const float pulseT = 1.0f - (m_stunPulseTimer / std::max(0.001f, m_stunPulseDuration));
-        const float ringA = 20.0f + (m_stunRadius * pulseT);
-        const float ringB = 10.0f + (m_stunRadius * std::min(1.0f, pulseT + 0.2f));
-        DrawPulseDots(platform, m_camera, player.pos, ringA, 6, 80, 220, 255);
-        DrawPulseDots(platform, m_camera, player.pos, ringB, 4, 180, 240, 255);
+    if (m_flowState == FlowState::QuitConfirm) {
+        const char* items[] = { "NO", "YES - QUIT" };
+        DrawMenuOverlay(platform, m_assets.Font(),
+            "QUIT GAME?",
+            items, 2, m_quitMenuIndex,
+            "W/S: Change   ENTER: Select",
+            "ESC: Back"
+        );
+        return;
     }
 
-    for (const Entity& e : m_entities) {
-        if (!e.active) continue;
-
-        const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
-        const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
-
-        if (e.type == EntityType::Player) {
-            if (e.invulnTimer > 0.0f) {
-                const int phase = (int)(e.invulnTimer * 20.0f);
-                if ((phase & 1) == 0) {
-                    continue;
-                }
-            }
-
-            const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
-            const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
-            platform.DrawSprite(playerTex, drawX, drawY);
-            continue;
-        }
-
-        if (e.type == EntityType::Pickup) {
-            Vec2 screen = m_camera.WorldToScreen(e.pos);
-            switch (e.pickupKind) {
-            case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break;
-            case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 220, 80); break;
-            case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 80, 160, 255); break;
-            case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180, 80, 220); break;
-            default:                 platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
-            }
-            continue;
-        }
-
-        if (dbg.showPaths && e.type == EntityType::Enemy) {
-            for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
-                Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
-                Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
-                platform.DrawLine((int)a.x, (int)a.y, (int)b.x, (int)b.y);
-            }
-        }
-
-        const int size = (int)(e.radius * 2.0f);
-        const int drawX = (int)(screenPos.x - size * 0.5f);
-        const int drawY = (int)(screenPos.y - size * 0.5f);
-
-        int r = 200, g = 80, b = 80;
-        switch (e.enemyKind) {
-        case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
-        case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
-        default: break;
-        }
-
-        platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
-
-        if (e.stunTimer > 0.0f) {
-            platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
-        }
+    if (m_flowState == FlowState::Win) {
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU WIN!",
+            "ENTER: Next Level",
+            "ESC: Quit   R: Restart Level"
+        );
+        return;
     }
 
-    DrawHUD(platform);
-    DrawToast(platform);
-    DrawDamageFlash(platform);
-
-    if (!m_levelValidationMsg.empty()) {
-        platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
+    if (m_flowState == FlowState::Lose) {
+        DrawCenteredOverlay(platform, m_assets.Font(),
+            "YOU LOSE!",
+            "ENTER/R: Restart Level",
+            "ESC: Quit"
+        );
+        return;
     }
+
+if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
+		return;
+
+	if (m_requestQuit)
+		return;
+
+	const Entity& player = m_entities[m_playerIndex];
+	const auto& playerTex = m_assets.Player();
+
+	if (dbg.showGrid) {
+		DrawWorldGrid(platform);
+	}
+
+	// World (tilemap first, then entities)
+	m_map.Render(platform, m_camera);
+
+	for (const Entity& e : m_entities) {
+		if (!e.active) continue;
+		const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
+		const Vec2 screenPos = m_camera.WorldToScreen(worldPos);
+
+		if (e.type == EntityType::Player) {
+			// Blink while invulnerable
+			if (e.invulnTimer > 0.0f) {
+				const int phase = (int)(e.invulnTimer * 20.0f);
+				if ((phase & 1) == 0) {
+					continue;
+				}
+			}
+
+			const int drawX = (int)(screenPos.x - playerTex.Width() * 0.5f);
+			const int drawY = (int)(screenPos.y - playerTex.Height() * 0.5f);
+			platform.DrawSprite(playerTex, drawX, drawY);
+		}
+		else if (e.type == EntityType::Pickup) {
+			Vec2 screen = m_camera.WorldToScreen(e.pos);
+			// Color by pickup kind
+			switch (e.pickupKind) {
+			case PickupKind::Token:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 255, 255, 0); break; // yellow
+			case PickupKind::Health: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 220, 80); break; // green
+			case PickupKind::Speed:  platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16,  80, 160, 255); break; // blue
+			case PickupKind::Shield: platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 180,  80, 220); break; // purple
+			default:                platform.DrawFilledRect((int)screen.x - 8, (int)screen.y - 8, 16, 16, 120, 120, 120); break;
+			}
+		}
+		else {
+			if (dbg.showPaths && e.type == EntityType::Enemy) {
+				for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
+					Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
+					Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
+					platform.DrawLine((int)a.x, (int)a.y, (int)b.x, (int)b.y);
+				}
+			}
+
+			const int size = (int)(e.radius * 2.0f);
+			const int drawX = (int)(screenPos.x - size * 0.5f);
+			const int drawY = (int)(screenPos.y - size * 0.5f);
+			int r = 200, g = 80, b = 80; // chaser default
+			switch (e.enemyKind) {
+			case EnemyKind::Fast: r = 80; g = 200; b = 80; break;
+			case EnemyKind::Tank: r = 80; g = 80; b = 200; break;
+			default: break;
+			}
+			platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+			if (e.stunTimer > 0.0f) {
+				platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
+			}
+		}
+	}
+
+
+
+
+// Stun pulse visual so the player can read the ability clearly.
+if (m_stunPulseTimer > 0.0f) {
+	const float t = 1.0f - (m_stunPulseTimer / m_stunPulseDuration);
+	const float radius = std::max(8.0f, m_stunRadius * t);
+	DrawPulseDots(platform, m_camera, player.pos, radius, 6, 80, 220, 255);
+}
+
+	// --------------------
+	// HUD (screen-space)
+	// --------------------
+	const int maxH = std::max(1, dbg.playerMaxHealth);
+	const int curH = std::max(0, std::min(player.health, maxH));
+
+	int x = 16, y = 16;
+	for (int i = 0; i < curH; ++i) {
+		platform.DrawFilledRect(x + i * 22, y, 18, 18, 220, 60, 60);
+	}
+	for (int i = curH; i < maxH; ++i) {
+		platform.DrawFilledRect(x + i * 22, y, 18, 18, 60, 60, 60);
+	}
+
+	// Tokens row (below hearts)
+	// Shows collected (yellow) and remaining (gray) tokens.
+	const int tokenSize = 18;     // same as hearts
+	const int tokenStep = 22;     // same spacing as hearts
+	const int tokenX = 16;
+	const int tokenY = 16 + tokenStep; // one row below hearts
+
+	const int totalTokens = std::max(0, m_tokensTotal);
+	const int collected = std::max(0, std::min(m_tokensCollected, totalTokens));
+
+	for (int i = 0; i < totalTokens; ++i) {
+		if (i < collected) {
+			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 255, 255, 0);
+		} else {
+			platform.DrawFilledRect(tokenX + i * tokenStep, tokenY, tokenSize, tokenSize, 60, 60, 60);
+		}
+	}
+
+	// Buff indicators (same size as hearts/tokens)
+	const int buffY = tokenY + tokenStep;
+	// Speed
+	if (m_speedBuffTimer > 0.0f) platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 80, 160, 255);
+	else                         platform.DrawFilledRect(tokenX, buffY, tokenSize, tokenSize, 40, 40, 40);
+	// Shield
+	if (m_shieldTimer > 0.0f)    platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 180, 80, 220);
+	else                         platform.DrawFilledRect(tokenX + tokenStep, buffY, tokenSize, tokenSize, 40, 40, 40);
+
+	if (m_flowState == FlowState::QuitConfirm) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+
+		// Dim background
+		platform.DrawFilledRect(0, 0, w, h, 10, 10, 10);
+
+		// Center box
+		const int bw = 560;
+		const int bh = 120;
+		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 40, 40, 40);
+
+		// Two hint bars (no text renderer yet)
+		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 20, 380, 24, 70, 70, 70);   // "Quit? Enter"
+		platform.DrawFilledRect((w - 380) / 2, (h - bh) / 2 + 60, 380, 24, 70, 70, 70);   // "Esc to cancel"
+		return;
+		}
+
+// --------------------
+	// Game Over overlay (no text renderer yet)
+	// --------------------
+	if (m_gameOver) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+
+		// Dim background
+		platform.DrawFilledRect(0, 0, w, h, 20, 20, 20);
+
+		// Big red banner
+		const int bw = 520;
+		const int bh = 90;
+		platform.DrawFilledRect((w - bw) / 2, (h - bh) / 2, bw, bh, 180, 40, 40);
+
+		// "Press R" hint bar
+		const int hw = 320;
+		const int hh = 22;
+		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
+	}
+	if (m_gameWin) {
+		int w = 0, h = 0;
+		platform.GetWindowSize(w, h);
+
+		platform.DrawFilledRect(0, 0, w, h, 60, 60, 60); // darken if your draw supports color/alpha
+		platform.DrawFilledRect(w / 2 - 220, h / 2 - 40, 440, 80, 60, 60, 60);
+	}
+
+
+	// --------------------
+	// HUD + feedback (only during gameplay)
+	// --------------------
+	DrawHUD(platform);
+	DrawToast(platform);
+	DrawDamageFlash(platform);
+
+
+	// If the map had issues, show a small hint so you notice immediately.
+	if (!m_levelValidationMsg.empty()) {
+		platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
+	}
 }
 
 // --------------------
@@ -1173,66 +1454,113 @@ void Game::ValidateAndSanitizeMap()
 }
 
 
+
 bool Game::GenerateProceduralLevel(int levelIndex) {
     const int width = 40;
     const int height = 24;
     std::vector<int> tiles((size_t)width * (size_t)height, 1);
     auto idx = [width](int x, int y) { return y * width + x; };
 
-    std::mt19937 rng((uint32_t)(0xC0FFEEu + (uint32_t)levelIndex * 977u));
+    const uint32_t seed = 0xC0FFEEu + (uint32_t)levelIndex * 977u;
+    std::mt19937 rng(seed);
 
     auto carve = [&](int x, int y) {
+        if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
         tiles[idx(x, y)] = 0;
     };
 
-    // Start with a maze on odd cells so there is always a path structure.
-    carve(1, 1);
-    std::vector<std::pair<int,int>> stack;
-    stack.push_back({1, 1});
-    const int dirOrder[4][2] = { {2,0},{-2,0},{0,2},{0,-2} };
-
-    while (!stack.empty()) {
-        auto [cx, cy] = stack.back();
-        std::array<int,4> order = {0,1,2,3};
-        std::shuffle(order.begin(), order.end(), rng);
-
-        bool moved = false;
-        for (int oi = 0; oi < 4; ++oi) {
-            const int* d = dirOrder[order[oi]];
-            int nx = cx + d[0];
-            int ny = cy + d[1];
-            if (nx <= 0 || ny <= 0 || nx >= width - 1 || ny >= height - 1) continue;
-            if (tiles[idx(nx, ny)] == 0) continue;
-            carve(cx + d[0] / 2, cy + d[1] / 2);
-            carve(nx, ny);
-            stack.push_back({nx, ny});
-            moved = true;
-            break;
+    auto carveRoom = [&](int x0, int y0, int x1, int y1) {
+        x0 = std::max(1, x0); y0 = std::max(1, y0);
+        x1 = std::min(width - 2, x1); y1 = std::min(height - 2, y1);
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                carve(x, y);
+            }
         }
+    };
 
-        if (!moved) stack.pop_back();
-    }
+    auto carveHallway = [&](int x0, int y0, int x1, int y1) {
+        int x = x0;
+        int y = y0;
+        while (x != x1) {
+            carve(x, y);
+            x += (x1 > x) ? 1 : -1;
+            carve(x, y);
+        }
+        while (y != y1) {
+            carve(x, y);
+            y += (y1 > y) ? 1 : -1;
+            carve(x, y);
+        }
+    };
 
-    // Put the player in a central safe room so every level starts readable.
-    const int roomHalfW = 3;
-    const int roomHalfH = 2;
+    struct Room { int x0, y0, x1, y1, cx, cy; };
+    std::vector<Room> rooms;
+
     const int centerX = width / 2;
     const int centerY = height / 2;
-    for (int y = centerY - roomHalfH; y <= centerY + roomHalfH; ++y) {
-        for (int x = centerX - roomHalfW; x <= centerX + roomHalfW; ++x) {
-            if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) continue;
+
+    // Central safe room / hub.
+    Room hub{
+        centerX - 4, centerY - 3,
+        centerX + 4, centerY + 3,
+        centerX, centerY
+    };
+    carveRoom(hub.x0, hub.y0, hub.x1, hub.y1);
+    rooms.push_back(hub);
+
+    // Extra rooms keep the map more open than the old single-path maze.
+    std::uniform_int_distribution<int> roomWDist(5, 9);
+    std::uniform_int_distribution<int> roomHDist(4, 7);
+    std::uniform_int_distribution<int> roomXDist(2, width - 11);
+    std::uniform_int_distribution<int> roomYDist(2, height - 9);
+
+    for (int i = 0; i < 8; ++i) {
+        const int rw = roomWDist(rng);
+        const int rh = roomHDist(rng);
+        const int rx = roomXDist(rng);
+        const int ry = roomYDist(rng);
+
+        Room r{
+            rx, ry,
+            rx + rw - 1, ry + rh - 1,
+            rx + rw / 2, ry + rh / 2
+        };
+
+        carveRoom(r.x0, r.y0, r.x1, r.y1);
+        rooms.push_back(r);
+    }
+
+    // Connect rooms in a chain and then add a few extra loop connections.
+    for (size_t i = 1; i < rooms.size(); ++i) {
+        carveHallway(rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
+    }
+
+    std::uniform_int_distribution<int> roomPickDist(0, (int)rooms.size() - 1);
+    for (int i = 0; i < 6; ++i) {
+        const Room& a = rooms[roomPickDist(rng)];
+        const Room& b = rooms[roomPickDist(rng)];
+        carveHallway(a.cx, a.cy, b.cx, b.cy);
+    }
+
+    // Punch extra openings so enemies can circle and patrol instead of getting stuck in long corridors.
+    std::uniform_int_distribution<int> openXDist(1, width - 2);
+    std::uniform_int_distribution<int> openYDist(1, height - 2);
+    for (int i = 0; i < 80; ++i) {
+        const int x = openXDist(rng);
+        const int y = openYDist(rng);
+        if (x <= 1 || y <= 1 || x >= width - 2 || y >= height - 2) continue;
+
+        const bool verticalWalls = (tiles[idx(x, y - 1)] == 0 && tiles[idx(x, y + 1)] == 0);
+        const bool horizontalWalls = (tiles[idx(x - 1, y)] == 0 && tiles[idx(x + 1, y)] == 0);
+        if (verticalWalls || horizontalWalls) {
             carve(x, y);
         }
     }
-    carve(centerX, centerY - roomHalfH - 1);
-    carve(centerX, centerY + roomHalfH + 1);
-    carve(centerX - roomHalfW - 1, centerY);
-    carve(centerX + roomHalfW + 1, centerY);
 
     const int playerX = centerX;
     const int playerY = centerY;
 
-    // Collect walkable cells and split them into safe / far buckets.
     std::vector<std::pair<int,int>> pickupCells;
     std::vector<std::pair<int,int>> enemyCells;
     std::vector<std::pair<int,int>> farCells;
@@ -1241,21 +1569,21 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 
     for (int y = 1; y < height - 1; ++y) {
         for (int x = 1; x < width - 1; ++x) {
-            if (tiles[idx(x, y)] != 0) continue;
+            if (!IsWalkableProcTile(tiles[idx(x, y)])) continue;
             if (x == playerX && y == playerY) continue;
 
-            int d = manhattan(x, y, playerX, playerY);
+            const int d = manhattan(x, y, playerX, playerY);
             if (d >= 4) pickupCells.push_back({x, y});
-            if (d >= 8) enemyCells.push_back({x, y});
-            if (d >= 12) farCells.push_back({x, y});
+            if (d >= 9) enemyCells.push_back({x, y});
+            if (d >= 13) farCells.push_back({x, y});
         }
     }
 
     auto placeFrom = [&](std::vector<std::pair<int,int>>& cells, int value, int count) {
         for (int i = 0; i < count && !cells.empty(); ++i) {
             std::uniform_int_distribution<int> dist(0, (int)cells.size() - 1);
-            int pick = dist(rng);
-            auto [x, y] = cells[pick];
+            const int pick = dist(rng);
+            const auto [x, y] = cells[pick];
             std::swap(cells[pick], cells.back());
             cells.pop_back();
             tiles[idx(x, y)] = value;
@@ -1266,7 +1594,6 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
     std::shuffle(enemyCells.begin(), enemyCells.end(), rng);
     std::shuffle(farCells.begin(), farCells.end(), rng);
 
-    // Difficulty ramp matches the earlier CSV rules, just generated now.
     const int basicPickups = std::min((int)pickupCells.size(), 3 + levelIndex * 2);
     const int basicEnemies = std::min((int)enemyCells.size(), 2 + levelIndex);
 
@@ -1292,10 +1619,9 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 
     tiles[idx(playerX, playerY)] = 4;
 
-    // Safety net: make sure the level did not end up too cramped.
     const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
-    if (reachable < 80) {
-        m_levelValidationMsg = "Generated level was too cramped. Using a simpler open fallback layout.";
+    if (reachable < 140) {
+        m_levelValidationMsg = "Generated level was too cramped. Using open fallback layout.";
         std::fill(tiles.begin(), tiles.end(), 0);
         for (int x = 0; x < width; ++x) {
             tiles[idx(x, 0)] = 1;
@@ -1305,32 +1631,31 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
             tiles[idx(0, y)] = 1;
             tiles[idx(width - 1, y)] = 1;
         }
-        // Add a few chunky walls so it is still a level and not just an empty box.
-        for (int x = 6; x < width - 6; ++x) {
+
+        for (int x = 8; x < width - 8; ++x) {
             if (x == centerX) continue;
-            tiles[idx(x, 6)] = 1;
-            tiles[idx(x, height - 7)] = 1;
+            tiles[idx(x, 7)] = 1;
+            tiles[idx(x, height - 8)] = 1;
         }
-        for (int y = 5; y < height - 5; ++y) {
+        for (int y = 6; y < height - 6; ++y) {
             if (y == centerY) continue;
-            tiles[idx(8, y)] = 1;
-            tiles[idx(width - 9, y)] = 1;
+            tiles[idx(10, y)] = 1;
+            tiles[idx(width - 11, y)] = 1;
         }
-        // Restore the safe room and simple content.
-        for (int y = centerY - roomHalfH; y <= centerY + roomHalfH; ++y) {
-            for (int x = centerX - roomHalfW; x <= centerX + roomHalfW; ++x) tiles[idx(x, y)] = 0;
-        }
+
+        carveRoom(hub.x0, hub.y0, hub.x1, hub.y1);
         tiles[idx(playerX, playerY)] = 4;
         if (centerX + 10 < width - 1) tiles[idx(centerX + 10, centerY)] = 3;
         if (centerX - 8 > 0) tiles[idx(centerX - 8, centerY + 3)] = 2;
         if (levelIndex >= 4 && centerX + 12 < width - 1) tiles[idx(centerX + 12, centerY + 4)] = 5;
         if (levelIndex >= 7 && centerX - 12 > 0) tiles[idx(centerX - 12, centerY - 4)] = 8;
     } else {
-        m_levelValidationMsg = "Procedural level generated from seed " + std::to_string(0xC0FFEEu + (uint32_t)levelIndex * 977u) + ".";
+        m_levelValidationMsg = "Procedural level generated from seed " + std::to_string(seed) + " (open-room layout).";
     }
 
     return m_map.LoadFromData(width, height, tiles);
 }
+
 
 void Game::RestartGame() {
 	m_gameOver = false;
