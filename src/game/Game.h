@@ -139,4 +139,12 @@ private:
     // enemies
     float m_enemyKnockbackStrength = 450.0f;
     float m_enemyHitstunSeconds = 0.08f;
+
+    struct DungeonRoom
+    {
+        int x;
+        int y;
+        int w;
+        int h;
+    };
 };
