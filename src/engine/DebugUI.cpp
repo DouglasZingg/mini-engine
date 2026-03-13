@@ -105,6 +105,7 @@ ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
 
     ImGui::Checkbox("Show Grid", &dbg.showGrid);
     ImGui::Checkbox("Show Colliders", &dbg.showColliders);
+    ImGui::Checkbox("Show Enemy Paths", &dbg.showPaths);
     ImGui::Checkbox("Pause Simulation", &dbg.pause);
 
     ImGui::SliderFloat("Shake Strength", &dbg.shakeStrength, 0.0f, 25.0f, "%.1f");

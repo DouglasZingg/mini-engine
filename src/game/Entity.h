@@ -35,6 +35,7 @@ struct Entity {
 
     float aggroRadius = 350.0f;  
     EnemyKind enemyKind = EnemyKind::Chaser;
+    Vec2 homePos{ 0,0 };         // patrol anchor / room center
 
     // Optional per-entity override. If 0, code will use m_enemySpeed.
     float moveSpeed = 0.0f;
