@@ -1,53 +1,39 @@
 #pragma once
 #include <cstdint>
+
 #include "engine/Input.h"
 
-// Forward declarations to avoid pulling SDL headers into the public interface.
 struct SDL_Window;
 struct SDL_Renderer;
 class SdlTexture;
 
-/**
- * Per-frame data produced by the platform layer.
- */
+// Per-frame data produced by the platform layer.
 struct SdlFrameData {
-    float dtSeconds = 0.0f;     // time since last frame (seconds)
-    float timeSeconds = 0.0f;   // running time since start (seconds)
-    Input input;               // current input snapshot
+    float dtSeconds = 0.0f;
+    float timeSeconds = 0.0f;
+    Input input;
 };
 
-/**
- * Minimal SDL2 platform wrapper.
- * Owns window + renderer and provides:
- *  - timing
- *  - input polling
- *  - basic 2D drawing helpers
- */
+// Minimal SDL2 platform wrapper. Owns the window / renderer and exposes
+// just enough drawing and input for the game layer.
 class SdlPlatform {
 public:
     bool Init(int windowW, int windowH, const char* title);
     void Shutdown();
 
-    // Returns false when the app should quit.
     bool Pump(SdlFrameData& outFrame);
 
-    // Frame lifecycle
     void BeginFrame();
     void EndFrame();
 
-    // Query helpers
     void GetWindowSize(int& outW, int& outH) const;
     SDL_Renderer* RendererRaw() const { return m_renderer; }
+    SDL_Window* WindowRaw() const { return m_window; }
 
-    // Drawing helpers (screen-space)
     void DrawSprite(const SdlTexture& tex, int x, int y);
     void DrawLine(int x1, int y1, int x2, int y2);
     void DrawFilledRect(int x, int y, int w, int h,
                         std::uint8_t r, std::uint8_t g, std::uint8_t b);
-
-    // (Removed) legacy debug test rect helper.
-
-    SDL_Window* WindowRaw() const { return m_window; }
 
     using SdlEventCallback = void(*)(void* userData, const void* sdlEvent);
     void SetEventCallback(SdlEventCallback cb, void* userData);
@@ -55,29 +41,25 @@ public:
     void ToggleFullscreen();
 
     void DrawTextBMP(const SdlTexture& font, int x, int y, const char* text,
-        int glyphW, int glyphH, int cols, int firstChar = 32, int scale = 2);
+                     int glyphW, int glyphH, int cols, int firstChar = 32, int scale = 2);
+
 private:
-    SDL_Window*   m_window = nullptr;
+    SDL_Window* m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
 
     std::uint64_t m_perfFreq = 0;
     std::uint64_t m_prevCounter = 0;
-    float         m_timeSeconds = 0.0f;
+    float m_timeSeconds = 0.0f;
 
     SdlEventCallback m_eventCb = nullptr;
     void* m_eventUser = nullptr;
 
-    // Input is owned by the platform so Pressed/Released survives across frames.
+    // Input lives here so Pressed/Released survives across frames.
     Input m_input{};
 
-    // Fullscreen toggle state
     bool m_isFullscreen = false;
-
-    // Remember windowed placement so we can restore it after fullscreen
     int m_windowedX = 0;
     int m_windowedY = 0;
     int m_windowedW = 1280;
     int m_windowedH = 720;
-
-
 };

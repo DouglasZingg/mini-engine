@@ -1,35 +1,32 @@
 #include "engine/DebugUI.h"
-#include "platform/SdlPlatform.h"
 
-#include <imgui.h>
-
-// These must be included so the ImGui_ImplSDL2_* symbols are declared:
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_sdlrenderer2.h"
-
-#include <SDL.h>
-#include "DebugState.h"
 #include <cstdio>
 
+#include <SDL.h>
+#include <imgui.h>
+
+#include "DebugState.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdlrenderer2.h"
+#include "platform/SdlPlatform.h"
+
 bool DebugUI::Init(SdlPlatform& platform) {
-    if (m_initialized) return true;
+    if (m_initialized) {
+        return true;
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard; // disables tab/arrow nav
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
 
-    // Optional: basic style
     ImGui::StyleColorsDark();
 
-    SDL_Window* win = platform.WindowRaw();
-    SDL_Renderer* ren = platform.RendererRaw();
-
-    if (!ImGui_ImplSDL2_InitForSDLRenderer(win, ren)) {
+    if (!ImGui_ImplSDL2_InitForSDLRenderer(platform.WindowRaw(), platform.RendererRaw())) {
         return false;
     }
-    if (!ImGui_ImplSDLRenderer2_Init(ren)) {
+    if (!ImGui_ImplSDLRenderer2_Init(platform.RendererRaw())) {
         return false;
     }
 
@@ -38,7 +35,9 @@ bool DebugUI::Init(SdlPlatform& platform) {
 }
 
 void DebugUI::Shutdown() {
-    if (!m_initialized) return;
+    if (!m_initialized) {
+        return;
+    }
 
     ImGui_ImplSDLRenderer2_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -48,7 +47,9 @@ void DebugUI::Shutdown() {
 }
 
 void DebugUI::BeginFrame() {
-    if (!m_initialized || !m_enabled) return;
+    if (!m_initialized || !m_enabled) {
+        return;
+    }
 
     ImGui_ImplSDLRenderer2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
@@ -56,7 +57,9 @@ void DebugUI::BeginFrame() {
 }
 
 void DebugUI::EndFrame(SdlPlatform& platform) {
-    if (!m_initialized || !m_enabled) return;
+    if (!m_initialized || !m_enabled) {
+        return;
+    }
 
     ImGui::Render();
     ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), platform.RendererRaw());
@@ -64,10 +67,12 @@ void DebugUI::EndFrame(SdlPlatform& platform) {
 
 void DebugUI::OnSdlEvent(void* userData, const void* sdlEvent) {
     DebugUI* self = reinterpret_cast<DebugUI*>(userData);
-    if (!self || !self->m_initialized || !self->m_enabled) return;
+    if (!self || !self->m_initialized || !self->m_enabled) {
+        return;
+    }
 
-    const SDL_Event* e = reinterpret_cast<const SDL_Event*>(sdlEvent);
-    ImGui_ImplSDL2_ProcessEvent(e);
+    const SDL_Event* event = reinterpret_cast<const SDL_Event*>(sdlEvent);
+    ImGui_ImplSDL2_ProcessEvent(event);
 }
 
 void DebugUI::Draw(DebugState& dbg) {
@@ -75,8 +80,9 @@ void DebugUI::Draw(DebugState& dbg) {
     dbg.imguiWantsKeyboard = io.WantCaptureKeyboard;
     dbg.imguiWantsMouse = io.WantCaptureMouse;
 
-    if (!m_initialized || !m_enabled) return;
-    if (!dbg.showUI) return;
+    if (!m_initialized || !m_enabled || !dbg.showUI) {
+        return;
+    }
 
     ImGui::Begin("Mini Engine Debug");
 
@@ -89,18 +95,17 @@ void DebugUI::Draw(DebugState& dbg) {
     ImGui::Text("player: (%.1f, %.1f)", dbg.playerPos.x, dbg.playerPos.y);
     ImGui::Text("camera: (%.1f, %.1f)", dbg.cameraPos.x, dbg.cameraPos.y);
     ImGui::Text("entities: %d", dbg.entityCount);
+    ImGui::Text("enemies: %d", dbg.enemyCount);
+    ImGui::Separator();
 
-
-ImGui::Separator();
-ImGui::Text("Combat");
-ImGui::Text("Health: %d / %d", dbg.playerHealth, dbg.playerMaxHealth);
-if (dbg.gameOver) {
-    ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "GAME OVER (press R)");
-}
-ImGui::SliderInt("Max Health", &dbg.playerMaxHealth, 1, 10);
-ImGui::SliderFloat("Invuln (sec)", &dbg.invulnSeconds, 0.1f, 2.0f, "%.2f");
-ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
-
+    ImGui::Text("Combat");
+    ImGui::Text("Health: %d / %d", dbg.playerHealth, dbg.playerMaxHealth);
+    if (dbg.gameOver) {
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "GAME OVER (press R)");
+    }
+    ImGui::SliderInt("Max Health", &dbg.playerMaxHealth, 1, 10);
+    ImGui::SliderFloat("Invuln (sec)", &dbg.invulnSeconds, 0.1f, 2.0f, "%.2f");
+    ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
     ImGui::Separator();
 
     ImGui::Checkbox("Show Grid", &dbg.showGrid);
@@ -109,7 +114,6 @@ ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
     ImGui::Checkbox("Pause Simulation", &dbg.pause);
 
     ImGui::SliderFloat("Shake Strength", &dbg.shakeStrength, 0.0f, 25.0f, "%.1f");
-
     ImGui::SliderFloat("Zoom", &dbg.zoom, 0.5f, 2.0f, "%.2f");
     ImGui::Separator();
 
@@ -120,18 +124,17 @@ ImGui::SliderFloat("Hit Knockback", &dbg.hitKnockback, 0.0f, 800.0f, "%.0f");
     ImGui::End();
 
     ImGui::Begin("Entities");
-
     for (int i = 0; i < dbg.debugEntityCount; ++i) {
-        const auto& e = dbg.debugEntities[i];
+        const auto& entity = dbg.debugEntities[i];
 
         char label[64];
         std::snprintf(label, sizeof(label), "%s #%u",
-            (e.type == 0) ? "Player" : "Enemy",
-            e.id);
+            (entity.type == 0) ? "Player" : (entity.type == 1 ? "Enemy" : "Pickup"),
+            entity.id);
 
-        bool selected = (dbg.selectedEntityId == e.id);
+        const bool selected = (dbg.selectedEntityId == entity.id);
         if (ImGui::Selectable(label, selected)) {
-            dbg.selectedEntityId = e.id;
+            dbg.selectedEntityId = entity.id;
         }
     }
 

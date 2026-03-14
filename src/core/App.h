@@ -1,5 +1,4 @@
 #pragma once
-#include <cstdint>
 
 struct AppConfig {
     int windowWidth = 1280;

@@ -1,29 +1,32 @@
 #include "platform/SdlTexture.h"
-#include "platform/SdlPlatform.h"
-#include <SDL.h>
+
 #include <cstdio>
+
+#include <SDL.h>
+
+#include "platform/SdlPlatform.h"
 
 bool SdlTexture::LoadBMP(SdlPlatform& platform, const char* path) {
     Destroy();
 
-    SDL_Surface* surf = SDL_LoadBMP(path);
-    if (!surf) {
+    SDL_Surface* surface = SDL_LoadBMP(path);
+    if (!surface) {
         std::printf("[ERROR] SDL_LoadBMP failed (%s): %s\n", path, SDL_GetError());
         return false;
     }
 
-    m_w = surf->w;
-    m_h = surf->h;
+    m_w = surface->w;
+    m_h = surface->h;
 
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(platform.RendererRaw(), surf);
-    SDL_FreeSurface(surf);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(platform.RendererRaw(), surface);
+    SDL_FreeSurface(surface);
 
-    if (!tex) {
+    if (!texture) {
         std::printf("[ERROR] SDL_CreateTextureFromSurface failed: %s\n", SDL_GetError());
         return false;
     }
 
-    m_tex = tex;
+    m_tex = texture;
     std::printf("[INFO] Loaded BMP: %s (%dx%d)\n", path, m_w, m_h);
     return true;
 }
@@ -33,6 +36,7 @@ void SdlTexture::Destroy() {
         SDL_DestroyTexture(m_tex);
         m_tex = nullptr;
     }
+
     m_w = 0;
     m_h = 0;
 }

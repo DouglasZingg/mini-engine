@@ -1,12 +1,14 @@
-#include "core/App.h"
 #include <cstdio>
 
+#include "core/App.h"
+
 int main() {
-    std::printf("Mini Engine Day 1\n");
+    std::printf("Mini Engine\n");
 
     App app;
-    AppConfig cfg{};
-    if (!app.Init(cfg)) {
+    AppConfig config{};
+
+    if (!app.Init(config)) {
         std::printf("[FATAL] Init failed\n");
         return 1;
     }

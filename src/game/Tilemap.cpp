@@ -1,52 +1,74 @@
 #include "game/Tilemap.h"
-#include "platform/SdlPlatform.h"
-#include "engine/Camera2D.h" 
-#include "game/Pathfinding.h"
-#include <fstream>
-#include <sstream>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+
+#include "engine/Camera2D.h"
+#include "platform/SdlPlatform.h"
+
+namespace {
+float ClampFloat(float value, float minValue, float maxValue) {
+    return std::max(minValue, std::min(value, maxValue));
+}
+}
 
 int Tilemap::At(int x, int y) const {
-    if (x < 0 || y < 0 || x >= m_w || y >= m_h) return 1; // outside = solid
-    return m_tiles[(size_t)y * (size_t)m_w + (size_t)x];
+    if (x < 0 || y < 0 || x >= m_w || y >= m_h) {
+        return 1; // treat out-of-bounds as solid
+    }
+    return m_tiles[static_cast<size_t>(y) * static_cast<size_t>(m_w) + static_cast<size_t>(x)];
 }
 
 bool Tilemap::LoadCSV(const char* path) {
-    std::ifstream f(path);
-    if (!f) return false;
+    std::ifstream file(path);
+    if (!file) {
+        return false;
+    }
 
     m_tiles.clear();
     m_w = 0;
     m_h = 0;
 
     std::string line;
-    while (std::getline(f, line)) {
-        if (line.empty()) continue;
+    while (std::getline(file, line)) {
+        if (line.empty()) {
+            continue;
+        }
 
-        std::stringstream ss(line);
+        std::stringstream lineStream(line);
         std::string cell;
         std::vector<int> row;
 
-        while (std::getline(ss, cell, ',')) {
+        while (std::getline(lineStream, cell, ',')) {
             row.push_back(std::atoi(cell.c_str()));
         }
 
-        if (m_w == 0) m_w = (int)row.size();
-        if ((int)row.size() != m_w) return false;
+        if (m_w == 0) {
+            m_w = static_cast<int>(row.size());
+        }
+        if (static_cast<int>(row.size()) != m_w) {
+            return false;
+        }
 
-        for (int v : row) m_tiles.push_back(v);
-        m_h++;
+        for (int value : row) {
+            m_tiles.push_back(value);
+        }
+        ++m_h;
     }
 
     return (m_w > 0 && m_h > 0);
 }
 
-
-
 bool Tilemap::LoadFromData(int width, int height, const std::vector<int>& tiles) {
-    if (width <= 0 || height <= 0) return false;
-    if ((int)tiles.size() != width * height) return false;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (static_cast<int>(tiles.size()) != width * height) {
+        return false;
+    }
 
     m_w = width;
     m_h = height;
@@ -55,88 +77,88 @@ bool Tilemap::LoadFromData(int width, int height, const std::vector<int>& tiles)
 }
 
 bool Tilemap::IsSolidAtWorld(const Vec2& world) const {
-    int tx = (int)std::floor(world.x / (float)m_tileSize);
-    int ty = (int)std::floor(world.y / (float)m_tileSize);
+    const int tx = static_cast<int>(std::floor(world.x / static_cast<float>(m_tileSize)));
+    const int ty = static_cast<int>(std::floor(world.y / static_cast<float>(m_tileSize)));
     return At(tx, ty) == 1;
 }
 
-static float clampf(float v, float lo, float hi) {
-    return std::max(lo, std::min(v, hi));
-}
-
 void Tilemap::ResolveCircleCollision(Vec2& pos, float radius) const {
-    // Check tiles around the circle
-    int minX = (int)std::floor((pos.x - radius) / m_tileSize);
-    int maxX = (int)std::floor((pos.x + radius) / m_tileSize);
-    int minY = (int)std::floor((pos.y - radius) / m_tileSize);
-    int maxY = (int)std::floor((pos.y + radius) / m_tileSize);
+    const int minX = static_cast<int>(std::floor((pos.x - radius) / m_tileSize));
+    const int maxX = static_cast<int>(std::floor((pos.x + radius) / m_tileSize));
+    const int minY = static_cast<int>(std::floor((pos.y - radius) / m_tileSize));
+    const int maxY = static_cast<int>(std::floor((pos.y + radius) / m_tileSize));
 
     for (int ty = minY; ty <= maxY; ++ty) {
         for (int tx = minX; tx <= maxX; ++tx) {
-            if (At(tx, ty) != 1) continue;
+            if (At(tx, ty) != 1) {
+                continue;
+            }
 
-            float left = tx * (float)m_tileSize;
-            float top = ty * (float)m_tileSize;
-            float right = left + m_tileSize;
-            float bottom = top + m_tileSize;
+            const float left = tx * static_cast<float>(m_tileSize);
+            const float top = ty * static_cast<float>(m_tileSize);
+            const float right = left + m_tileSize;
+            const float bottom = top + m_tileSize;
 
-            // Closest point on AABB to circle center
-            float cx = clampf(pos.x, left, right);
-            float cy = clampf(pos.y, top, bottom);
+            const float closestX = ClampFloat(pos.x, left, right);
+            const float closestY = ClampFloat(pos.y, top, bottom);
 
-            float dx = pos.x - cx;
-            float dy = pos.y - cy;
-            float distSq = dx * dx + dy * dy;
+            const float dx = pos.x - closestX;
+            const float dy = pos.y - closestY;
+            const float distSq = dx * dx + dy * dy;
 
             if (distSq < radius * radius && distSq > 0.00001f) {
-                float dist = std::sqrt(distSq);
-                float pen = radius - dist;
-                float nx = dx / dist;
-                float ny = dy / dist;
-                pos.x += nx * pen;
-                pos.y += ny * pen;
+                const float dist = std::sqrt(distSq);
+                const float penetration = radius - dist;
+                const float nx = dx / dist;
+                const float ny = dy / dist;
+                pos.x += nx * penetration;
+                pos.y += ny * penetration;
             }
         }
     }
 }
 
-void Tilemap::Render(SdlPlatform& platform, const Camera2D& cam) const {
-    // Render solid tiles as filled rects. (Color params depend on your API)
-    // We only draw tiles in view, but simplest first: draw all.
+void Tilemap::Render(SdlPlatform& platform, const Camera2D& camera) const {
     for (int y = 0; y < m_h; ++y) {
         for (int x = 0; x < m_w; ++x) {
-            if (At(x, y) != 1) continue;
+            if (At(x, y) != 1) {
+                continue;
+            }
 
-            Vec2 world{ x * (float)m_tileSize + m_tileSize * 0.5f,
-                        y * (float)m_tileSize + m_tileSize * 0.5f };
-            Vec2 screen = cam.WorldToScreen(world);
+            const Vec2 worldCenter{
+                x * static_cast<float>(m_tileSize) + m_tileSize * 0.5f,
+                y * static_cast<float>(m_tileSize) + m_tileSize * 0.5f
+            };
+            const Vec2 screenPos = camera.WorldToScreen(worldCenter);
 
-            int drawX = (int)(screen.x - m_tileSize * 0.5f);
-            int drawY = (int)(screen.y - m_tileSize * 0.5f);
-
+            const int drawX = static_cast<int>(screenPos.x - m_tileSize * 0.5f);
+            const int drawY = static_cast<int>(screenPos.y - m_tileSize * 0.5f);
             platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 60, 60, 60);
         }
     }
 }
 
 bool Tilemap::IsSolidTile(int tx, int ty) const {
-    return At(tx, ty) == 1; // 1 = wall
+    return At(tx, ty) == 1;
 }
 
 TileCoord Tilemap::WorldToTile(const Vec2& world) const {
-    int tx = (int)std::floor(world.x / (float)m_tileSize);
-    int ty = (int)std::floor(world.y / (float)m_tileSize);
-    return TileCoord{ tx, ty };
+    return TileCoord{
+        static_cast<int>(std::floor(world.x / static_cast<float>(m_tileSize))),
+        static_cast<int>(std::floor(world.y / static_cast<float>(m_tileSize)))
+    };
 }
 
 Vec2 Tilemap::TileToWorldCenter(int tx, int ty) const {
     return Vec2{
-        tx * (float)m_tileSize + m_tileSize * 0.5f,
-        ty * (float)m_tileSize + m_tileSize * 0.5f
+        tx * static_cast<float>(m_tileSize) + m_tileSize * 0.5f,
+        ty * static_cast<float>(m_tileSize) + m_tileSize * 0.5f
     };
 }
 
-void Tilemap::SetAt(int x, int y, int v) {
-    if (x < 0 || y < 0 || x >= m_w || y >= m_h) return;
-    m_tiles[y * m_w + x] = v;
+void Tilemap::SetAt(int x, int y, int value) {
+    if (x < 0 || y < 0 || x >= m_w || y >= m_h) {
+        return;
+    }
+    m_tiles[static_cast<size_t>(y) * static_cast<size_t>(m_w) + static_cast<size_t>(x)] = value;
 }

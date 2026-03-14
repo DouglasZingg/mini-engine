@@ -3,17 +3,13 @@
 
 class SdlPlatform;
 
-/**
- * Simple asset container.
- * For now this loads only the player BMP. Expand as the project grows.
- */
+// Small asset container for textures used across the game.
 class Assets {
 public:
     bool Init(SdlPlatform& platform);
     void Shutdown();
 
     const SdlTexture& Player() const { return m_player; }
-    // Add:
     const SdlTexture& Font() const { return m_font; }
 
 private:

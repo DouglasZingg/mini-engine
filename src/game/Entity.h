@@ -1,10 +1,11 @@
 #pragma once
 #include <cstdint>
-#include "engine/Math.h"
 #include <vector>
 
-enum class EntityType { Player, Enemy, Pickup };
+#include "engine/Math.h"
 
+// Minimal gameplay entity types used by the current project.
+enum class EntityType { Player, Enemy, Pickup };
 
 enum class PickupKind {
     Token = 0,
@@ -13,13 +14,16 @@ enum class PickupKind {
     Shield
 };
 
-using EntityId = uint32_t;  
 enum class AIState { Idle, Seek };
 enum class EnemyKind : uint8_t { Chaser = 0, Fast = 1, Tank = 2 };
+
+using EntityId = uint32_t;
+
+// Cached pathfinding state for enemies.
 struct PathState {
-    std::vector<Vec2> waypoints; // world positions
-    int index = 0;
-    float repathTimer = 0.0f;
+    std::vector<Vec2> waypoints;   // world-space waypoint list
+    int index = 0;                 // current waypoint
+    float repathTimer = 0.0f;      // seconds until next repath
     int lastGoalTX = 999999;
     int lastGoalTY = 999999;
 };
@@ -27,37 +31,29 @@ struct PathState {
 struct Entity {
     EntityId id = 0;
     EntityType type = EntityType::Enemy;
-    AIState ai = AIState::Idle;    
+    AIState ai = AIState::Idle;
 
-    Vec2 pos{ 0,0 };
-    Vec2 prevPos{ 0,0 };
+    Vec2 pos{ 0.0f, 0.0f };
+    Vec2 prevPos{ 0.0f, 0.0f };
+    Vec2 homePos{ 0.0f, 0.0f };    // patrol anchor / room center
+    Vec2 vel{ 0.0f, 0.0f };        // movement / knockback velocity
+
     float radius = 16.0f;
+    float aggroRadius = 350.0f;
+    float moveSpeed = 0.0f;        // 0 = use global enemy speed
 
-    float aggroRadius = 350.0f;  
     EnemyKind enemyKind = EnemyKind::Chaser;
-    Vec2 homePos{ 0,0 };         // patrol anchor / room center
-
-    // Optional per-entity override. If 0, code will use m_enemySpeed.
-    float moveSpeed = 0.0f;
-
-
-    // Combat (mostly for player)
-    int health = 3;
-    float invulnTimer = 0.0f;        // seconds remaining
-    float invulnDuration = 1.5f;    // seconds
-    Vec2 velocity{ 0,0 };            // for knockback / movement smoothing (optional)
-
     PathState path;
 
+    int health = 3;
+    float invulnTimer = 0.0f;
+    float invulnDuration = 1.5f;
+    float hitstun = 0.0f;
+    float stunTimer = 0.0f;
+
     bool active = true;
-    int value = 1;      // for pickups
 
-    // Pickup behavior
+    // Pickup-only data
     PickupKind pickupKind = PickupKind::Token;
-
-    // --- Combat polish ---
-    Vec2  vel{ 0,0 };              // velocity used for knockback and movement smoothing
-    float hitstun = 0.0f;        // seconds remaining unable to act
-    float stunTimer = 0.0f;      // player utility stun pulse
-    bool  dead = false;          // death flag
+    int value = 1;
 };

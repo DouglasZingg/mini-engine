@@ -2,9 +2,9 @@
 #include <vector>
 #include <string>
 #include "engine/Math.h"
+#include "game/Pathfinding.h"
 
 class SdlPlatform;
-struct TileCoord;
 
 class Tilemap {
 public:

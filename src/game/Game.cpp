@@ -327,10 +327,6 @@ const bool cancelPressed  = input.Pressed(Action::Cancel);
 const bool restartPressed = input.Pressed(Action::Restart);
 const bool debugPressed   = input.Pressed(Action::ToggleDebug);
 const bool stunPressed    = input.Pressed(Action::Stun);
-// Keep legacy flags in sync for any old render paths
-	m_gameWin = (m_flowState == FlowState::Win);
-	m_gameOver = (m_flowState == FlowState::Lose);
-
 	// --------------------
 	// FLOW STATE HANDLING
 	// --------------------
@@ -542,7 +538,7 @@ if (m_flowState == FlowState::Win) {
 
 	m_playerMaxHealth = dbg.playerMaxHealth;
 	m_invulnSeconds = dbg.invulnSeconds;
-	m_hitKnockback = dbg.hitKnockback;
+	m_knockbackStrength = dbg.hitKnockback;
 
 	// Keep player state sane if tuning changed at runtime
 	if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
@@ -949,7 +945,7 @@ if (player.health <= 0) {
 	dbg.playerPos = player.pos;
 	dbg.cameraPos = m_camera.Position();
 	dbg.playerHealth = player.health;
-	dbg.gameOver = m_gameOver;
+	dbg.gameOver = (m_flowState == FlowState::Lose);
 	dbg.debugEntityCount = 0;
 	for (const Entity& e : m_entities) {
 		if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
@@ -1200,7 +1196,7 @@ if (m_stunPulseTimer > 0.0f) {
 // --------------------
 	// Game Over overlay (no text renderer yet)
 	// --------------------
-	if (m_gameOver) {
+	if (m_flowState == FlowState::Lose) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
 
@@ -1217,7 +1213,7 @@ if (m_stunPulseTimer > 0.0f) {
 		const int hh = 22;
 		platform.DrawFilledRect((w - hw) / 2, (h - bh) / 2 + bh + 18, hw, hh, 80, 80, 80);
 	}
-	if (m_gameWin) {
+	if (m_flowState == FlowState::Win) {
 		int w = 0, h = 0;
 		platform.GetWindowSize(w, h);
 
@@ -1357,7 +1353,7 @@ bool Game::ReloadConfig(const char* path) {
 void Game::ApplyConfig(const GameConfig& cfg, bool respawnEnemies) {
 	m_cfg = cfg;
 
-	m_playerSpeed = m_cfg.playerSpeed;
+	m_playerMoveSpeed = m_cfg.playerSpeed;
 	m_enemySpeed = m_cfg.enemySpeed;
 	// World size comes from the map so bigger/smaller CSVs "just work".
 	// Config values are treated as a fallback only (used before a map is loaded).
@@ -1457,257 +1453,332 @@ void Game::ValidateAndSanitizeMap()
 
 
 bool Game::GenerateProceduralLevel(int levelIndex) {
-    const int width = 40;
-    const int height = 24;
-    std::vector<int> tiles((size_t)width * (size_t)height, 1);
-    auto idx = [width](int x, int y) { return y * width + x; };
+	const int width = 44;
+	const int height = 28;
+	std::vector<int> tiles((size_t)width * (size_t)height, 1);
+	auto idx = [width](int x, int y) { return y * width + x; };
 
-    const uint32_t seed = 0xD06E0001u + (uint32_t)levelIndex * 977u;
-    std::mt19937 rng(seed);
+	const uint32_t seed = 0xD06E1001u + (uint32_t)levelIndex * 977u;
+	std::mt19937 rng(seed);
 
-    auto carveFloor = [&](int x, int y) {
-        if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
-        tiles[idx(x, y)] = 0;
-    };
+	auto carveFloor = [&](int x, int y) {
+		if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
+		tiles[idx(x, y)] = 0;
+		};
 
-    struct ProcRoom { int x, y, w, h; };
-    auto roomCenterX = [](const ProcRoom& r) { return r.x + r.w / 2; };
-    auto roomCenterY = [](const ProcRoom& r) { return r.y + r.h / 2; };
-    auto roomsOverlapPadded = [](const ProcRoom& a, const ProcRoom& b, int pad) {
-        return !(a.x + a.w + pad <= b.x || b.x + b.w + pad <= a.x ||
-                 a.y + a.h + pad <= b.y || b.y + b.h + pad <= a.y);
-    };
+	struct ProcRoom {
+		int x, y, w, h;
+	};
 
-    auto carveRoom = [&](const ProcRoom& r) {
-        for (int y = r.y; y < r.y + r.h; ++y) {
-            for (int x = r.x; x < r.x + r.w; ++x) {
-                carveFloor(x, y);
-            }
-        }
-    };
+	auto roomCenterX = [](const ProcRoom& r) { return r.x + r.w / 2; };
+	auto roomCenterY = [](const ProcRoom& r) { return r.y + r.h / 2; };
 
-    auto carveCorridor = [&](int x0, int y0, int x1, int y1) {
-        int x = x0;
-        int y = y0;
-        carveFloor(x, y);
+	auto roomsOverlapPadded = [](const ProcRoom& a, const ProcRoom& b, int pad) {
+		return !(a.x + a.w + pad <= b.x || b.x + b.w + pad <= a.x ||
+			a.y + a.h + pad <= b.y || b.y + b.h + pad <= a.y);
+		};
 
-        const bool horizFirst = ((x0 + y0 + x1 + y1) & 1) == 0;
-        if (horizFirst) {
-            while (x != x1) {
-                x += (x1 > x) ? 1 : -1;
-                carveFloor(x, y);
-                if (y > 1) carveFloor(x, y - 1);
-                if (y < height - 2) carveFloor(x, y + 1);
-            }
-            while (y != y1) {
-                y += (y1 > y) ? 1 : -1;
-                carveFloor(x, y);
-                if (x > 1) carveFloor(x - 1, y);
-                if (x < width - 2) carveFloor(x + 1, y);
-            }
-        } else {
-            while (y != y1) {
-                y += (y1 > y) ? 1 : -1;
-                carveFloor(x, y);
-                if (x > 1) carveFloor(x - 1, y);
-                if (x < width - 2) carveFloor(x + 1, y);
-            }
-            while (x != x1) {
-                x += (x1 > x) ? 1 : -1;
-                carveFloor(x, y);
-                if (y > 1) carveFloor(x, y - 1);
-                if (y < height - 2) carveFloor(x, y + 1);
-            }
-        }
-    };
+	auto carveRoom = [&](const ProcRoom& r) {
+		for (int y = r.y; y < r.y + r.h; ++y) {
+			for (int x = r.x; x < r.x + r.w; ++x) {
+				carveFloor(x, y);
+			}
+		}
+		};
 
-    auto placeTileInRoom = [&](const ProcRoom& room, int tileValue, std::vector<std::pair<int,int>>& used, int minDistFromCenter) -> bool {
-        std::vector<std::pair<int,int>> candidates;
-        const int cx = width / 2;
-        const int cy = height / 2;
-        for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
-            for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
-                if (!IsWalkableProcTile(tiles[idx(x, y)])) continue;
-                bool taken = false;
-                for (const auto& p : used) {
-                    if (p.first == x && p.second == y) { taken = true; break; }
-                }
-                if (taken) continue;
-                const int manhattan = std::abs(x - cx) + std::abs(y - cy);
-                if (manhattan < minDistFromCenter) continue;
-                candidates.push_back({x, y});
-            }
-        }
-        if (candidates.empty()) return false;
-        std::uniform_int_distribution<int> pickDist(0, (int)candidates.size() - 1);
-        auto p = candidates[pickDist(rng)];
-        tiles[idx(p.first, p.second)] = tileValue;
-        used.push_back(p);
-        return true;
-    };
+	auto carveDoor = [&](int x, int y) {
+		carveFloor(x, y);
+		if (x > 1) carveFloor(x - 1, y);
+		if (x < width - 2) carveFloor(x + 1, y);
+		if (y > 1) carveFloor(x, y - 1);
+		if (y < height - 2) carveFloor(x, y + 1);
+		};
 
-    std::vector<ProcRoom> rooms;
+	auto carveCorridor = [&](int x0, int y0, int x1, int y1) {
+		int x = x0;
+		int y = y0;
+		carveFloor(x, y);
 
-    // Start room in the middle so the player begins in a safe dungeon chamber.
-    ProcRoom startRoom{ width / 2 - 4, height / 2 - 3, 9, 7 };
-    rooms.push_back(startRoom);
-    carveRoom(startRoom);
+		const bool horizFirst = ((x0 + y0 + x1 + y1) & 1) == 0;
 
-    std::uniform_int_distribution<int> wDist(6, 10);
-    std::uniform_int_distribution<int> hDist(5, 8);
-    std::uniform_int_distribution<int> xDist(2, width - 12);
-    std::uniform_int_distribution<int> yDist(2, height - 10);
+		if (horizFirst) {
+			while (x != x1) {
+				x += (x1 > x) ? 1 : -1;
+				carveFloor(x, y);
+			}
+			while (y != y1) {
+				y += (y1 > y) ? 1 : -1;
+				carveFloor(x, y);
+			}
+		}
+		else {
+			while (y != y1) {
+				y += (y1 > y) ? 1 : -1;
+				carveFloor(x, y);
+			}
+			while (x != x1) {
+				x += (x1 > x) ? 1 : -1;
+				carveFloor(x, y);
+			}
+		}
+		};
 
-    // Build a floor from simple square/rect rooms.
-    for (int attempt = 0; attempt < 60 && rooms.size() < 10; ++attempt) {
-        ProcRoom r;
-        r.w = wDist(rng);
-        r.h = hDist(rng);
-        r.x = xDist(rng);
-        r.y = yDist(rng);
+	auto placeTileInRoom = [&](const ProcRoom& room, int tileValue,
+		std::vector<std::pair<int, int>>& used,
+		int minDistFromStart) -> bool
+		{
+			std::vector<std::pair<int, int>> candidates;
+			const int startCx = width / 2;
+			const int startCy = height / 2;
 
-        bool overlaps = false;
-        for (const auto& other : rooms) {
-            if (roomsOverlapPadded(r, other, 1)) {
-                overlaps = true;
-                break;
-            }
-        }
-        if (overlaps) continue;
+			for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+				for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+					if (!IsWalkableProcTile(tiles[idx(x, y)])) continue;
 
-        rooms.push_back(r);
-        carveRoom(r);
-    }
+					bool taken = false;
+					for (const auto& p : used) {
+						if (p.first == x && p.second == y) {
+							taken = true;
+							break;
+						}
+					}
+					if (taken) continue;
 
-    // Connect each room to the nearest existing room so the dungeon stays readable.
-    for (size_t i = 1; i < rooms.size(); ++i) {
-        int bestIndex = 0;
-        int bestDist = 1 << 30;
-        for (size_t j = 0; j < i; ++j) {
-            const int dx = roomCenterX(rooms[i]) - roomCenterX(rooms[j]);
-            const int dy = roomCenterY(rooms[i]) - roomCenterY(rooms[j]);
-            const int dist = dx * dx + dy * dy;
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestIndex = (int)j;
-            }
-        }
-        carveCorridor(roomCenterX(rooms[i]), roomCenterY(rooms[i]), roomCenterX(rooms[bestIndex]), roomCenterY(rooms[bestIndex]));
-    }
+					const int manhattan = std::abs(x - startCx) + std::abs(y - startCy);
+					if (manhattan < minDistFromStart) continue;
 
-    // Add a few extra connections so future hidden doors / loops make sense.
-    if (rooms.size() >= 4) {
-        std::uniform_int_distribution<int> roomPickDist(0, (int)rooms.size() - 1);
-        for (int i = 0; i < 3; ++i) {
-            int a = roomPickDist(rng);
-            int b = roomPickDist(rng);
-            if (a == b) continue;
-            carveCorridor(roomCenterX(rooms[a]), roomCenterY(rooms[a]), roomCenterX(rooms[b]), roomCenterY(rooms[b]));
-        }
-    }
+					candidates.push_back({ x, y });
+				}
+			}
 
-    const int playerX = roomCenterX(startRoom);
-    const int playerY = roomCenterY(startRoom);
-    tiles[idx(playerX, playerY)] = 4;
+			if (candidates.empty()) return false;
 
-    auto classifyRoom = [&](size_t roomIndex) {
-        if (roomIndex == 0) return 0; // start
-        if (roomIndex == rooms.size() - 1 && levelIndex >= 4) return 2; // reward-ish
-        std::uniform_int_distribution<int> typeDist(0, 99);
-        int roll = typeDist(rng);
-        if (roll < 20) return 1; // empty / light
-        if (roll < 45) return 2; // reward
-        if (roll < 80) return 3; // mixed
-        return 4; // combat
-    };
+			std::uniform_int_distribution<int> pickDist(0, (int)candidates.size() - 1);
+			const auto p = candidates[pickDist(rng)];
+			tiles[idx(p.first, p.second)] = tileValue;
+			used.push_back(p);
+			return true;
+		};
 
-    int basicEnemies = 2 + levelIndex;
-    int basicPickups = 3 + levelIndex * 2;
-    int healthCount = 0, speedCount = 0, shieldCount = 0, fastCount = 0, tankCount = 0;
-    if (levelIndex >= 4) {
-        healthCount = 1 + (levelIndex - 4);
-        speedCount = 1 + (levelIndex - 4) / 2;
-    }
-    if (levelIndex >= 7) {
-        shieldCount = 1 + (levelIndex - 7);
-        fastCount = 1 + (levelIndex - 7);
-        tankCount = 1 + (levelIndex - 7) / 2;
-    }
+	std::vector<ProcRoom> rooms;
 
-    auto useCount = [](int& total, int wantPerRoom) {
-        int n = std::min(total, wantPerRoom);
-        total -= n;
-        return n;
-    };
+	// Central start room. This is your safe "party enters the dungeon floor" room.
+	ProcRoom startRoom{ width / 2 - 4, height / 2 - 3, 9, 7 };
+	rooms.push_back(startRoom);
+	carveRoom(startRoom);
 
-    for (size_t ri = 1; ri < rooms.size(); ++ri) {
-        const ProcRoom& room = rooms[ri];
-        std::vector<std::pair<int,int>> used;
-        const int roomType = classifyRoom(ri);
+	// Build a dungeon floor out of square/rectangular rooms.
+	std::uniform_int_distribution<int> wDist(6, 10);
+	std::uniform_int_distribution<int> hDist(5, 9);
+	std::uniform_int_distribution<int> xDist(2, width - 12);
+	std::uniform_int_distribution<int> yDist(2, height - 11);
 
-        if (roomType == 2 || roomType == 3) {
-            const int tokensHere = (roomType == 2) ? 1 : 1 + ((int)ri & 1);
-            for (int i = 0; i < useCount(basicPickups, tokensHere); ++i) {
-                placeTileInRoom(room, 2, used, 4);
-            }
-            if (healthCount > 0) for (int i = 0; i < useCount(healthCount, 1); ++i) placeTileInRoom(room, 5, used, 6);
-            if (speedCount > 0)  for (int i = 0; i < useCount(speedCount, 1); ++i)  placeTileInRoom(room, 6, used, 6);
-            if (shieldCount > 0 && roomType == 2) for (int i = 0; i < useCount(shieldCount, 1); ++i) placeTileInRoom(room, 7, used, 8);
-        }
+	for (int attempt = 0; attempt < 90 && rooms.size() < 11; ++attempt) {
+		ProcRoom r;
+		r.w = wDist(rng);
+		r.h = hDist(rng);
+		r.x = xDist(rng);
+		r.y = yDist(rng);
 
-        if (roomType == 3 || roomType == 4) {
-            const int baseEnemiesHere = (roomType == 4) ? 2 : 1;
-            for (int i = 0; i < useCount(basicEnemies, baseEnemiesHere); ++i) {
-                placeTileInRoom(room, 3, used, 8);
-            }
-            if (fastCount > 0) for (int i = 0; i < useCount(fastCount, 1); ++i) placeTileInRoom(room, 8, used, 10);
-            if (tankCount > 0 && room.w >= 7 && room.h >= 6) for (int i = 0; i < useCount(tankCount, 1); ++i) placeTileInRoom(room, 9, used, 10);
-        }
-    }
+		bool overlaps = false;
+		for (const auto& other : rooms) {
+			if (roomsOverlapPadded(r, other, 1)) {
+				overlaps = true;
+				break;
+			}
+		}
+		if (overlaps) continue;
 
-    // Spill any leftover pickups/enemies into non-start rooms if the floor rolled light rooms.
-    for (size_t ri = 1; ri < rooms.size() && (basicPickups > 0 || basicEnemies > 0 || healthCount > 0 || speedCount > 0 || shieldCount > 0 || fastCount > 0 || tankCount > 0); ++ri) {
-        std::vector<std::pair<int,int>> used;
-        const ProcRoom& room = rooms[ri];
-        if (basicPickups > 0) for (int i = 0; i < useCount(basicPickups, 1); ++i) placeTileInRoom(room, 2, used, 4);
-        if (basicEnemies > 0) for (int i = 0; i < useCount(basicEnemies, 1); ++i) placeTileInRoom(room, 3, used, 8);
-        if (healthCount > 0) for (int i = 0; i < useCount(healthCount, 1); ++i) placeTileInRoom(room, 5, used, 6);
-        if (speedCount > 0) for (int i = 0; i < useCount(speedCount, 1); ++i) placeTileInRoom(room, 6, used, 6);
-        if (shieldCount > 0) for (int i = 0; i < useCount(shieldCount, 1); ++i) placeTileInRoom(room, 7, used, 8);
-        if (fastCount > 0) for (int i = 0; i < useCount(fastCount, 1); ++i) placeTileInRoom(room, 8, used, 10);
-        if (tankCount > 0) for (int i = 0; i < useCount(tankCount, 1); ++i) placeTileInRoom(room, 9, used, 10);
-    }
+		rooms.push_back(r);
+		carveRoom(r);
+	}
 
-    const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
-    if (reachable < 120) {
-        m_levelValidationMsg = "Generated level was too cramped. Using simple dungeon fallback.";
-        std::fill(tiles.begin(), tiles.end(), 1);
+	// Connect every room to the nearest already-placed room.
+	// This keeps the layout readable and dungeon-like instead of maze-like.
+	for (size_t i = 1; i < rooms.size(); ++i) {
+		int bestIndex = 0;
+		int bestDist = 1 << 30;
 
-        ProcRoom a{ 4, 4, 8, 6 };
-        ProcRoom b{ width / 2 - 4, height / 2 - 3, 9, 7 };
-        ProcRoom c{ width - 12, height - 10, 8, 6 };
-        carveRoom(a); carveRoom(b); carveRoom(c);
-        carveCorridor(roomCenterX(a), roomCenterY(a), roomCenterX(b), roomCenterY(b));
-        carveCorridor(roomCenterX(b), roomCenterY(b), roomCenterX(c), roomCenterY(c));
+		for (size_t j = 0; j < i; ++j) {
+			const int dx = roomCenterX(rooms[i]) - roomCenterX(rooms[j]);
+			const int dy = roomCenterY(rooms[i]) - roomCenterY(rooms[j]);
+			const int dist = dx * dx + dy * dy;
+			if (dist < bestDist) {
+				bestDist = dist;
+				bestIndex = (int)j;
+			}
+		}
 
-        tiles[idx(roomCenterX(b), roomCenterY(b))] = 4;
-        tiles[idx(roomCenterX(a), roomCenterY(a))] = 2;
-        tiles[idx(roomCenterX(c), roomCenterY(c))] = 3;
-        if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 5;
-        if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
-    } else {
-        m_levelValidationMsg = "Procedural level generated from seed " + std::to_string(seed) + " (room dungeon).";
-    }
+		const int ax = roomCenterX(rooms[i]);
+		const int ay = roomCenterY(rooms[i]);
+		const int bx = roomCenterX(rooms[bestIndex]);
+		const int by = roomCenterY(rooms[bestIndex]);
 
-    return m_map.LoadFromData(width, height, tiles);
+		carveDoor(ax, ay);
+		carveDoor(bx, by);
+		carveCorridor(ax, ay, bx, by);
+	}
+
+	// Add a few loops so the floor feels more like a dungeon level
+	// and can support later hidden doors / side connections.
+	if (rooms.size() >= 5) {
+		std::uniform_int_distribution<int> roomPick(0, (int)rooms.size() - 1);
+		for (int i = 0; i < 3; ++i) {
+			int a = roomPick(rng);
+			int b = roomPick(rng);
+			if (a == b) continue;
+
+			carveCorridor(
+				roomCenterX(rooms[a]), roomCenterY(rooms[a]),
+				roomCenterX(rooms[b]), roomCenterY(rooms[b]));
+		}
+	}
+
+	// Player start
+	const int playerX = roomCenterX(startRoom);
+	const int playerY = roomCenterY(startRoom);
+	tiles[idx(playerX, playerY)] = 4;
+
+	auto classifyRoom = [&](size_t roomIndex) {
+		if (roomIndex == 0) return 0; // start
+		std::uniform_int_distribution<int> rollDist(0, 99);
+		int roll = rollDist(rng);
+
+		if (roll < 20) return 1; // empty
+		if (roll < 40) return 2; // reward
+		if (roll < 75) return 3; // mixed
+		return 4;                // combat
+		};
+
+	int basicEnemies = 2 + levelIndex;
+	int basicPickups = 3 + levelIndex * 2;
+
+	int healthCount = 0;
+	int speedCount = 0;
+	int shieldCount = 0;
+	int fastCount = 0;
+	int tankCount = 0;
+
+	if (levelIndex >= 4) {
+		healthCount = 1 + (levelIndex - 4);
+		speedCount = 1 + (levelIndex - 4) / 2;
+	}
+
+	if (levelIndex >= 7) {
+		shieldCount = 1 + (levelIndex - 7);
+		fastCount = 1 + (levelIndex - 7);
+		tankCount = 1 + (levelIndex - 7) / 2;
+	}
+
+	auto useCount = [](int& total, int want) {
+		int n = std::min(total, want);
+		total -= n;
+		return n;
+		};
+
+	// Populate rooms by room role.
+	for (size_t ri = 1; ri < rooms.size(); ++ri) {
+		const ProcRoom& room = rooms[ri];
+		std::vector<std::pair<int, int>> used;
+		const int roomType = classifyRoom(ri);
+
+		if (roomType == 2 || roomType == 3) {
+			const int tokensHere = (roomType == 2) ? 1 : 1 + ((int)ri & 1);
+			for (int i = 0; i < useCount(basicPickups, tokensHere); ++i) {
+				placeTileInRoom(room, 2, used, 4);
+			}
+
+			if (healthCount > 0) {
+				for (int i = 0; i < useCount(healthCount, 1); ++i) {
+					placeTileInRoom(room, 5, used, 6);
+				}
+			}
+
+			if (speedCount > 0) {
+				for (int i = 0; i < useCount(speedCount, 1); ++i) {
+					placeTileInRoom(room, 6, used, 6);
+				}
+			}
+
+			if (shieldCount > 0 && roomType == 2) {
+				for (int i = 0; i < useCount(shieldCount, 1); ++i) {
+					placeTileInRoom(room, 7, used, 8);
+				}
+			}
+		}
+
+		if (roomType == 3 || roomType == 4) {
+			const int baseEnemiesHere = (roomType == 4) ? 2 : 1;
+
+			for (int i = 0; i < useCount(basicEnemies, baseEnemiesHere); ++i) {
+				placeTileInRoom(room, 3, used, 8);
+			}
+
+			if (fastCount > 0) {
+				for (int i = 0; i < useCount(fastCount, 1); ++i) {
+					placeTileInRoom(room, 8, used, 10);
+				}
+			}
+
+			if (tankCount > 0 && room.w >= 7 && room.h >= 6) {
+				for (int i = 0; i < useCount(tankCount, 1); ++i) {
+					placeTileInRoom(room, 9, used, 10);
+				}
+			}
+		}
+	}
+
+	// Spill leftovers into non-start rooms if the random floor rolled too many empty rooms.
+	for (size_t ri = 1; ri < rooms.size() &&
+		(basicPickups > 0 || basicEnemies > 0 || healthCount > 0 ||
+			speedCount > 0 || shieldCount > 0 || fastCount > 0 || tankCount > 0); ++ri)
+	{
+		std::vector<std::pair<int, int>> used;
+		const ProcRoom& room = rooms[ri];
+
+		if (basicPickups > 0) for (int i = 0; i < useCount(basicPickups, 1); ++i) placeTileInRoom(room, 2, used, 4);
+		if (basicEnemies > 0) for (int i = 0; i < useCount(basicEnemies, 1); ++i) placeTileInRoom(room, 3, used, 8);
+		if (healthCount > 0)  for (int i = 0; i < useCount(healthCount, 1); ++i)  placeTileInRoom(room, 5, used, 6);
+		if (speedCount > 0)   for (int i = 0; i < useCount(speedCount, 1); ++i)   placeTileInRoom(room, 6, used, 6);
+		if (shieldCount > 0)  for (int i = 0; i < useCount(shieldCount, 1); ++i)  placeTileInRoom(room, 7, used, 8);
+		if (fastCount > 0)    for (int i = 0; i < useCount(fastCount, 1); ++i)    placeTileInRoom(room, 8, used, 10);
+		if (tankCount > 0)    for (int i = 0; i < useCount(tankCount, 1); ++i)    placeTileInRoom(room, 9, used, 10);
+	}
+
+	const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
+	if (reachable < 140) {
+		m_levelValidationMsg = "Generated dungeon was too cramped. Using fallback floor.";
+
+		std::fill(tiles.begin(), tiles.end(), 1);
+
+		ProcRoom a{ 4, 5, 8, 6 };
+		ProcRoom b{ width / 2 - 4, height / 2 - 3, 9, 7 };
+		ProcRoom c{ width - 12, height - 10, 8, 6 };
+
+		carveRoom(a);
+		carveRoom(b);
+		carveRoom(c);
+
+		carveCorridor(roomCenterX(a), roomCenterY(a), roomCenterX(b), roomCenterY(b));
+		carveCorridor(roomCenterX(b), roomCenterY(b), roomCenterX(c), roomCenterY(c));
+
+		tiles[idx(roomCenterX(b), roomCenterY(b))] = 4;
+		tiles[idx(roomCenterX(a), roomCenterY(a))] = 2;
+		tiles[idx(roomCenterX(c), roomCenterY(c))] = 3;
+
+		if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 5;
+		if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
+	}
+	else {
+		m_levelValidationMsg = "Dungeon floor generated from seed " + std::to_string(seed) + ".";
+	}
+
+	return m_map.LoadFromData(width, height, tiles);
 }
 
-void Game::RestartGame() {
-	m_gameOver = false;
-	m_gameWin = false;
 
+void Game::RestartGame() {
 	// Reset runtime counters/state
-	m_score = 0;
 	m_pickupsRemaining = 0;
 	m_tokensCollected = 0;
 	m_tokensTotal = 0;

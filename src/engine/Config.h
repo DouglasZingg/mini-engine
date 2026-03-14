@@ -1,11 +1,9 @@
-/**
- * Simple game config loaded from assets/config.json.
- * This stays intentionally small while the engine is a prototype.
- */
 #pragma once
 #include <vector>
+
 #include "engine/Math.h"
 
+// Lightweight runtime config loaded from assets/config.json.
 struct SpawnPoint {
     Vec2 pos;
 };
@@ -19,6 +17,5 @@ struct GameConfig {
     Vec2 playerSpawn{ 500.0f, 500.0f };
     std::vector<SpawnPoint> enemySpawns;
 };
-
 
 bool LoadGameConfig(const char* path, GameConfig& outCfg);

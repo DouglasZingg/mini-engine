@@ -3,10 +3,7 @@
 struct SDL_Texture;
 class SdlPlatform;
 
-/**
- * Minimal texture wrapper (BMP only for now).
- * Owns an SDL_Texture and tracks width/height.
- */
+// Minimal BMP texture wrapper used by the SDL renderer path.
 class SdlTexture {
 public:
     bool LoadBMP(SdlPlatform& platform, const char* path);

@@ -126,9 +126,6 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
     const bool cancelPressed = input.Pressed(Action::Cancel);
     const bool restartPressed = input.Pressed(Action::Restart);
 
-    m_gameWin = (m_flowState == FlowState::Win);
-    m_gameOver = (m_flowState == FlowState::Lose);
-
     switch (m_flowState) {
     case FlowState::Title: {
         const int itemCount = 3;

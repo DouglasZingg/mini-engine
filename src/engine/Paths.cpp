@@ -1,34 +1,32 @@
 #include "engine/Paths.h"
 
-#include <SDL.h>
 #include <filesystem>
 #include <string>
 #include <vector>
 
-std::string AssetPath(const char* rel)
-{
+#include <SDL.h>
+
+std::string AssetPath(const char* relPath) {
     namespace fs = std::filesystem;
 
-    char* baseC = SDL_GetBasePath();
-    fs::path exeDir = baseC ? fs::path(baseC) : fs::current_path();
-    SDL_free(baseC);
+    char* basePathRaw = SDL_GetBasePath();
+    const fs::path exeDir = basePathRaw ? fs::path(basePathRaw) : fs::current_path();
+    SDL_free(basePathRaw);
 
-    std::vector<fs::path> roots;
-    roots.push_back(exeDir);              
-    roots.push_back(exeDir / ".." / "..");  
-    roots.push_back(fs::current_path());  
+    const fs::path relativePath(relPath);
+    const std::vector<fs::path> roots = {
+        exeDir,
+        exeDir / ".." / "..",
+        fs::current_path()
+    };
 
-    fs::path relPath(rel);
-
-    for (const fs::path& root : roots)
-    {
-        fs::path candidate = root / relPath;
+    for (const fs::path& root : roots) {
+        const fs::path candidate = root / relativePath;
         std::error_code ec;
-        if (fs::exists(candidate, ec))
-        {
+        if (fs::exists(candidate, ec)) {
             return candidate.lexically_normal().string();
         }
     }
 
-    return (exeDir / relPath).lexically_normal().string();
+    return (exeDir / relativePath).lexically_normal().string();
 }

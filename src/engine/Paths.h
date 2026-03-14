@@ -1,4 +1,5 @@
 #pragma once
 #include <string>
 
-std::string AssetPath(const char* rel);
+// Returns a best-effort absolute path to an asset relative to the project.
+std::string AssetPath(const char* relPath);

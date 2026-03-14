@@ -1,17 +1,20 @@
 #pragma once
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 struct TileCoord {
     int x = 0;
     int y = 0;
-    bool operator==(const TileCoord& o) const { return x == o.x && y == o.y; }
+
+    bool operator==(const TileCoord& other) const {
+        return x == other.x && y == other.y;
+    }
 };
 
 class Tilemap;
 
 namespace Pathfinding {
-    // Returns path INCLUDING start and goal tiles if found. Empty = no path.
-    std::vector<TileCoord> AStar(const Tilemap& map, TileCoord start, TileCoord goal,
-        int maxNodesExpanded = 4000);
+// Returns a path including the start and goal tiles. Empty means no path.
+std::vector<TileCoord> AStar(const Tilemap& map, TileCoord start, TileCoord goal,
+                             int maxNodesExpanded = 4000);
 }

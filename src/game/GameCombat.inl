@@ -77,10 +77,10 @@ void Game::UpdatePlayer(Entity& player, const Input& input, float fixedDt) {
 void Game::UpdateEnemies(const Entity& player, float fixedDt) {
     for (Entity& e : m_entities) {
         if (!e.active || e.type != EntityType::Enemy) continue;
-        if (e.stunTimer > 0.0f) continue;
 
         e.prevPos = e.pos;
 
+        // Stunned enemies are frozen and do not chase.
         if (e.stunTimer > 0.0f) {
             e.vel = { 0.0f, 0.0f };
             continue;
@@ -166,6 +166,7 @@ void Game::ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugStat
 
         Entity& e = m_entities[i];
         if (!e.active || e.type != EntityType::Enemy) continue;
+        if (e.stunTimer > 0.0f) continue; // stunned enemies cannot damage the player
 
         if (CheckCollision(player, e)) {
             SeparateEntities(player, e);
@@ -312,7 +313,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
     m_playerMaxHealth = dbg.playerMaxHealth;
     m_invulnSeconds = dbg.invulnSeconds;
-    m_hitKnockback = dbg.hitKnockback;
+    m_knockbackStrength = dbg.hitKnockback;
 
     if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
     player.invulnDuration = m_invulnSeconds;
