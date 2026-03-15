@@ -32,6 +32,19 @@ private:
     bool GenerateProceduralLevel(int levelIndex);
     void RestartGame();
 
+
+    // Flow / update / render sections live in the companion .inl files.
+    void SyncDebugSnapshot(DebugState& dbg) const;
+    bool UpdateFlowScreens(const Input& input, DebugState& dbg);
+    bool RenderFlowScreen(SdlPlatform& platform) const;
+
+    void UpdateRuntimeTimers(float fixedDt);
+    void UpdatePlayer(Entity& player, const Input& input, float fixedDt);
+    void UpdateEnemies(const Entity& player, float fixedDt);
+    void ResolveEnemySeparation();
+    void ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg);
+    void HandlePickupCollisions(Entity& player);
+
     // Screen-space helpers
     void DrawWorldGrid(SdlPlatform& platform) const;
     void DrawHUD(SdlPlatform& platform) const;
