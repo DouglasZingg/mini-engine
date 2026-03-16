@@ -34,8 +34,10 @@ Entity& Game::CreateEntity(EntityType type, Vec2 pos, float radius) {
 	e.pos = pos;
 	e.prevPos = pos;
 	e.homePos = pos;
+	e.patrolTarget = pos;
 	e.radius = radius;
 	e.ai = AIState::Idle;
+	e.aiTimer = 0.6f;
 	e.aggroRadius = 350.0f;
 	m_entities.push_back(e);
 	return m_entities.back();

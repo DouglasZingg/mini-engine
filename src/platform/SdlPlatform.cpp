@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <vector>
 
 bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO) != 0) {
         std::printf("[ERROR] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
@@ -38,6 +39,21 @@ bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
         return false;
     }
 
+    SDL_AudioSpec want{};
+    SDL_AudioSpec have{};
+    want.freq = 48000;
+    want.format = AUDIO_F32SYS;
+    want.channels = 1;
+    want.samples = 2048;
+
+    m_audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    if (m_audioDevice != 0) {
+        m_audioSampleRate = (have.freq > 0) ? have.freq : 48000;
+        SDL_PauseAudioDevice(m_audioDevice, 0);
+    } else {
+        std::printf("[WARN] SDL audio init failed: %s\n", SDL_GetError());
+    }
+
     m_perfFreq = static_cast<std::uint64_t>(SDL_GetPerformanceFrequency());
     m_prevCounter = static_cast<std::uint64_t>(SDL_GetPerformanceCounter());
 
@@ -48,6 +64,11 @@ bool SdlPlatform::Init(int windowW, int windowH, const char* title) {
 }
 
 void SdlPlatform::Shutdown() {
+    if (m_audioDevice != 0) {
+        SDL_ClearQueuedAudio(m_audioDevice);
+        SDL_CloseAudioDevice(m_audioDevice);
+        m_audioDevice = 0;
+    }
     if (m_renderer) {
         SDL_DestroyRenderer(m_renderer);
         m_renderer = nullptr;
@@ -216,4 +237,37 @@ void SdlPlatform::DrawTextBMP(const SdlTexture& font, int x, int y, const char* 
 
         penX += glyphW * scale;
     }
+}
+
+void SdlPlatform::PlayTone(float frequencyHz, float durationSeconds, float volume) {
+    if (m_audioDevice == 0) return;
+
+    frequencyHz = std::clamp(frequencyHz, 80.0f, 2400.0f);
+    durationSeconds = std::clamp(durationSeconds, 0.02f, 0.35f);
+    volume = std::clamp(volume, 0.0f, 0.4f);
+
+    const int sampleCount = std::max(1, static_cast<int>(durationSeconds * static_cast<float>(m_audioSampleRate)));
+    std::vector<float> samples(static_cast<size_t>(sampleCount), 0.0f);
+
+    const float attack = 0.01f;
+    const float release = 0.03f;
+    const int attackSamples = std::max(1, static_cast<int>(attack * m_audioSampleRate));
+    const int releaseSamples = std::max(1, static_cast<int>(release * m_audioSampleRate));
+
+    const float step = 6.28318530718f * frequencyHz / static_cast<float>(m_audioSampleRate);
+    float phase = 0.0f;
+
+    for (int i = 0; i < sampleCount; ++i) {
+        float env = 1.0f;
+        if (i < attackSamples) {
+            env = static_cast<float>(i) / static_cast<float>(attackSamples);
+        } else if (i > sampleCount - releaseSamples) {
+            env = static_cast<float>(sampleCount - i) / static_cast<float>(releaseSamples);
+        }
+
+        samples[static_cast<size_t>(i)] = std::sin(phase) * volume * env;
+        phase += step;
+    }
+
+    SDL_QueueAudio(m_audioDevice, samples.data(), static_cast<Uint32>(samples.size() * sizeof(float)));
 }

@@ -43,6 +43,9 @@ public:
     void DrawTextBMP(const SdlTexture& font, int x, int y, const char* text,
                      int glyphW, int glyphH, int cols, int firstChar = 32, int scale = 2);
 
+    // Tiny built-in tone generator used for lightweight UI/gameplay feedback.
+    void PlayTone(float frequencyHz, float durationSeconds, float volume = 0.18f);
+
 private:
     SDL_Window* m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
@@ -58,6 +61,8 @@ private:
     Input m_input{};
 
     bool m_isFullscreen = false;
+    std::uint32_t m_audioDevice = 0;
+    int m_audioSampleRate = 48000;
     int m_windowedX = 0;
     int m_windowedY = 0;
     int m_windowedW = 1280;

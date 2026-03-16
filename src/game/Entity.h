@@ -14,7 +14,7 @@ enum class PickupKind {
     Shield
 };
 
-enum class AIState { Idle, Seek };
+enum class AIState { Idle, Patrol, Alert, Seek, ReturnHome, Stunned };
 enum class EnemyKind : uint8_t { Chaser = 0, Fast = 1, Tank = 2 };
 
 using EntityId = uint32_t;
@@ -36,6 +36,7 @@ struct Entity {
     Vec2 pos{ 0.0f, 0.0f };
     Vec2 prevPos{ 0.0f, 0.0f };
     Vec2 homePos{ 0.0f, 0.0f };    // patrol anchor / room center
+    Vec2 patrolTarget{ 0.0f, 0.0f }; // current idle/patrol destination
     Vec2 vel{ 0.0f, 0.0f };        // movement / knockback velocity
 
     float radius = 16.0f;
@@ -50,6 +51,9 @@ struct Entity {
     float invulnDuration = 1.5f;
     float hitstun = 0.0f;
     float stunTimer = 0.0f;
+    float aiTimer = 0.0f;
+    int patrolStep = 0;            // increments whenever a new patrol target is chosen
+    int patrolRadiusTiles = 3;     // how far enemy can wander from home          // generic state timer (idle wait / alert windup)
 
     bool active = true;
 

@@ -105,7 +105,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
             continue;
         }
 
-        if (dbg.showPaths && e.type == EntityType::Enemy) {
+        if (dbg.showUI && dbg.showPaths && e.type == EntityType::Enemy) {
             for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
                 Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
                 Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
@@ -129,14 +129,47 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
         if (e.stunTimer > 0.0f) {
             platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
         }
+
+        if (dbg.showUI && e.type == EntityType::Enemy) {
+            const char* stateText = "IDLE";
+            switch (e.ai) {
+            case AIState::Patrol:     stateText = "PATROL"; break;
+            case AIState::Alert:      stateText = "ALERT"; break;
+            case AIState::Seek:       stateText = "SEEK"; break;
+            case AIState::ReturnHome: stateText = "RETURN"; break;
+            case AIState::Stunned:    stateText = "STUN"; break;
+            default: break;
+            }
+
+            platform.DrawTextBMP(m_assets.Font(), drawX - 8, drawY - 22, stateText, 8, 8, 16, 32, 1);
+        }
     }
 
+    DrawFloatingTexts(platform);
     DrawHUD(platform);
     DrawToast(platform);
     DrawDamageFlash(platform);
 
     if (!m_levelValidationMsg.empty()) {
         platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
+    }
+}
+
+
+void Game::DrawFloatingTexts(SdlPlatform& platform) const
+{
+    if (m_floatingTexts.empty()) return;
+
+    const int glyphW = 8, glyphH = 8, cols = 16;
+    for (const FloatingText& ft : m_floatingTexts) {
+        Vec2 screen = m_camera.WorldToScreen(ft.worldPos);
+        const int textW = static_cast<int>(ft.text.size()) * glyphW * 2;
+        const int x = static_cast<int>(screen.x) - textW / 2;
+        const int y = static_cast<int>(screen.y);
+
+        // Small shadow first so the text is readable against any floor color.
+        platform.DrawTextBMP(m_assets.Font(), x + 2, y + 2, ft.text.c_str(), glyphW, glyphH, cols, 32, 2);
+        platform.DrawTextBMP(m_assets.Font(), x, y, ft.text.c_str(), glyphW, glyphH, cols, 32, 2);
     }
 }
 

@@ -35,20 +35,21 @@ private:
 
     // Flow / update / render sections live in the companion .inl files.
     void SyncDebugSnapshot(DebugState& dbg) const;
-    bool UpdateFlowScreens(const Input& input, DebugState& dbg);
+    bool UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugState& dbg);
     bool RenderFlowScreen(SdlPlatform& platform) const;
 
     void UpdateRuntimeTimers(float fixedDt);
     void UpdatePlayer(Entity& player, const Input& input, float fixedDt);
     void UpdateEnemies(const Entity& player, float fixedDt);
     void ResolveEnemySeparation();
-    void ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg);
-    void HandlePickupCollisions(Entity& player);
+    void ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, float fixedDt, DebugState& dbg);
+    void HandlePickupCollisions(Entity& player, SdlPlatform& platform);
 
     // Screen-space helpers
     void DrawWorldGrid(SdlPlatform& platform) const;
     void DrawHUD(SdlPlatform& platform) const;
     void DrawToast(SdlPlatform& platform) const;
+    void DrawFloatingTexts(SdlPlatform& platform) const;
     void DrawDamageFlash(SdlPlatform& platform) const;
 
     // Config / entity helpers
@@ -57,6 +58,7 @@ private:
     void RespawnEnemiesFromConfig();
     Entity& CreateEntity(EntityType type, Vec2 pos, float radius);
     void SpawnPickupAt(const Vec2& worldPos, PickupKind kind);
+    void SpawnFloatingText(const Vec2& worldPos, const char* text);
 
 private:
     Assets m_assets;
@@ -88,6 +90,15 @@ private:
     float m_shakeStrength = 0.0f;
 
     // HUD / feedback
+
+    struct FloatingText {
+        Vec2 worldPos{ 0.0f, 0.0f };
+        float riseSpeed = 24.0f;
+        float timer = 0.0f;
+        float duration = 0.85f;
+        std::string text;
+    };
+    std::vector<FloatingText> m_floatingTexts;
     std::string m_toastText;
     float m_toastTimer = 0.0f;
     float m_toastDuration = 1.0f;

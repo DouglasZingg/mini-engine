@@ -119,7 +119,7 @@ void Game::SyncDebugSnapshot(DebugState& dbg) const {
     }
 }
 
-bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
+bool Game::UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugState& dbg) {
     const bool upPressed = input.Pressed(Action::Up);
     const bool downPressed = input.Pressed(Action::Down);
     const bool confirmPressed = input.Pressed(Action::Confirm);
@@ -129,10 +129,12 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
     switch (m_flowState) {
     case FlowState::Title: {
         const int itemCount = 3;
-        if (upPressed)   m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount;
-        if (downPressed) m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount;
+        if (upPressed)   { m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
+        if (downPressed) { m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
 
         if (confirmPressed) {
+            platform.PlayTone(780.0f, 0.06f, 0.16f);
+            platform.PlayTone(780.0f, 0.06f, 0.16f);
             if (m_titleMenuIndex == 0) m_flowState = FlowState::Playing;
             else if (m_titleMenuIndex == 1) m_flowState = FlowState::Controls;
             else m_requestQuit = true;
@@ -150,8 +152,8 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
 
     case FlowState::Paused: {
         const int itemCount = 4;
-        if (upPressed)   m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount;
-        if (downPressed) m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount;
+        if (upPressed)   { m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
+        if (downPressed) { m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
 
         if (confirmPressed) {
             if (m_pauseMenuIndex == 0) {
@@ -176,8 +178,9 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
     }
 
     case FlowState::QuitConfirm:
-        if (upPressed || downPressed) m_quitMenuIndex = (m_quitMenuIndex + 1) % 2;
+        if (upPressed || downPressed) { m_quitMenuIndex = (m_quitMenuIndex + 1) % 2; platform.PlayTone(520.0f, 0.04f, 0.12f); }
         if (confirmPressed) {
+            platform.PlayTone(780.0f, 0.06f, 0.16f);
             if (m_quitMenuIndex == 0) m_flowState = m_quitReturnState;
             else m_requestQuit = true;
         }
@@ -188,6 +191,7 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
 
     case FlowState::Win:
         if (confirmPressed) {
+            platform.PlayTone(920.0f, 0.08f, 0.18f);
             ++m_currentLevel;
             GenerateProceduralLevel(m_currentLevel);
             ValidateAndSanitizeMap();
@@ -196,6 +200,7 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
             m_flowState = FlowState::Playing;
         }
         else if (restartPressed) {
+            platform.PlayTone(660.0f, 0.06f, 0.16f);
             RestartGame();
             m_flowState = FlowState::Playing;
         }
@@ -206,6 +211,7 @@ bool Game::UpdateFlowScreens(const Input& input, DebugState& dbg) {
 
     case FlowState::Lose:
         if (confirmPressed || restartPressed) {
+            platform.PlayTone(660.0f, 0.06f, 0.16f);
             RestartGame();
             m_flowState = FlowState::Playing;
         }
