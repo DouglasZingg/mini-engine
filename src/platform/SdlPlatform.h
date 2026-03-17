@@ -27,6 +27,9 @@ public:
     void EndFrame();
 
     void GetWindowSize(int& outW, int& outH) const;
+    void GetMousePosition(int& outX, int& outY) const;
+    bool MouseDownLeft() const;
+    bool MousePressedLeft() const;
     SDL_Renderer* RendererRaw() const { return m_renderer; }
     SDL_Window* WindowRaw() const { return m_window; }
 
@@ -61,6 +64,10 @@ private:
     Input m_input{};
 
     bool m_isFullscreen = false;
+    int m_mouseX = 0;
+    int m_mouseY = 0;
+    bool m_mouseLeftDown = false;
+    bool m_prevMouseLeftDown = false;
     std::uint32_t m_audioDevice = 0;
     int m_audioSampleRate = 48000;
     int m_windowedX = 0;

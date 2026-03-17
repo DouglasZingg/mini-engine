@@ -53,7 +53,12 @@ struct Entity {
     float stunTimer = 0.0f;
     float aiTimer = 0.0f;
     int patrolStep = 0;            // increments whenever a new patrol target is chosen
-    int patrolRadiusTiles = 3;     // how far enemy can wander from home          // generic state timer (idle wait / alert windup)
+    int patrolRadiusTiles = 3;     // fallback wander distance when no room is assigned
+    int homeRoomIndex = -1;        // generated dungeon room this enemy belongs to
+    int patrolMinTX = -1;          // inclusive room patrol bounds in tile space
+    int patrolMinTY = -1;
+    int patrolMaxTX = -1;          // inclusive room patrol bounds in tile space
+    int patrolMaxTY = -1;
 
     bool active = true;
 

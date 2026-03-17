@@ -81,6 +81,57 @@ static void DrawMenuOverlay(SdlPlatform& platform, const SdlTexture& font,
     }
 }
 
+
+static bool UpdateMenuMouseSelection(
+    SdlPlatform& platform,
+    int itemCount,
+    int& selectedIndex,
+    int& outHoveredIndex,
+    bool& outClicked)
+{
+    outHoveredIndex = -1;
+    outClicked = false;
+
+    int mouseX = 0, mouseY = 0;
+    platform.GetMousePosition(mouseX, mouseY);
+
+    int w = 0, h = 0;
+    platform.GetWindowSize(w, h);
+
+    const int pw = 760;
+    const int ph = 360;
+    const int px = (w - pw) / 2;
+    const int py = (h - ph) / 2;
+
+    const int glyphH = 8;
+    int ty = py + 24;
+    ty += glyphH * 3 * 2; // skip title
+
+    for (int i = 0; i < itemCount; ++i) {
+        const int itemX = px + 16;
+        const int itemY = ty - 4;
+        const int itemW = pw - 32;
+        const int itemH = glyphH * 2 * 2 + 4;
+
+        const bool hovered =
+            mouseX >= itemX && mouseX < itemX + itemW &&
+            mouseY >= itemY && mouseY < itemY + itemH;
+
+        if (hovered) {
+            outHoveredIndex = i;
+            selectedIndex = i;
+            if (platform.MousePressedLeft()) {
+                outClicked = true;
+            }
+            break;
+        }
+
+        ty += glyphH * 2 * 2;
+    }
+
+    return outHoveredIndex >= 0;
+}
+
 void Game::SyncDebugSnapshot(DebugState& dbg) const {
     dbg.entityCount = (int)m_entities.size();
 
@@ -129,11 +180,14 @@ bool Game::UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugSta
     switch (m_flowState) {
     case FlowState::Title: {
         const int itemCount = 3;
+        int hoveredIndex = -1;
+        bool mouseClicked = false;
+        UpdateMenuMouseSelection(platform, itemCount, m_titleMenuIndex, hoveredIndex, mouseClicked);
+
         if (upPressed)   { m_titleMenuIndex = (m_titleMenuIndex + itemCount - 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
         if (downPressed) { m_titleMenuIndex = (m_titleMenuIndex + 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
 
-        if (confirmPressed) {
-            platform.PlayTone(780.0f, 0.06f, 0.16f);
+        if (confirmPressed || mouseClicked) {
             platform.PlayTone(780.0f, 0.06f, 0.16f);
             if (m_titleMenuIndex == 0) m_flowState = FlowState::Playing;
             else if (m_titleMenuIndex == 1) m_flowState = FlowState::Controls;
@@ -152,10 +206,14 @@ bool Game::UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugSta
 
     case FlowState::Paused: {
         const int itemCount = 4;
+        int hoveredIndex = -1;
+        bool mouseClicked = false;
+        UpdateMenuMouseSelection(platform, itemCount, m_pauseMenuIndex, hoveredIndex, mouseClicked);
+
         if (upPressed)   { m_pauseMenuIndex = (m_pauseMenuIndex + itemCount - 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
         if (downPressed) { m_pauseMenuIndex = (m_pauseMenuIndex + 1) % itemCount; platform.PlayTone(520.0f, 0.04f, 0.12f); }
 
-        if (confirmPressed) {
+        if (confirmPressed || mouseClicked) {
             if (m_pauseMenuIndex == 0) {
                 m_flowState = FlowState::Playing;
             } else if (m_pauseMenuIndex == 1) {
@@ -177,9 +235,14 @@ bool Game::UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugSta
         return true;
     }
 
-    case FlowState::QuitConfirm:
+    case FlowState::QuitConfirm: {
+        const int itemCount = 2;
+        int hoveredIndex = -1;
+        bool mouseClicked = false;
+        UpdateMenuMouseSelection(platform, itemCount, m_quitMenuIndex, hoveredIndex, mouseClicked);
+
         if (upPressed || downPressed) { m_quitMenuIndex = (m_quitMenuIndex + 1) % 2; platform.PlayTone(520.0f, 0.04f, 0.12f); }
-        if (confirmPressed) {
+        if (confirmPressed || mouseClicked) {
             platform.PlayTone(780.0f, 0.06f, 0.16f);
             if (m_quitMenuIndex == 0) m_flowState = m_quitReturnState;
             else m_requestQuit = true;
@@ -188,6 +251,7 @@ bool Game::UpdateFlowScreens(SdlPlatform& platform, const Input& input, DebugSta
 
         SyncDebugSnapshot(dbg);
         return true;
+    }
 
     case FlowState::Win:
         if (confirmPressed) {
@@ -242,7 +306,7 @@ bool Game::RenderFlowScreen(SdlPlatform& platform) const {
         DrawMenuOverlay(platform, m_assets.Font(),
             "MINI ENGINE",
             items, 3, m_titleMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
+            "W/S or MOUSE: Select   ENTER/CLICK: Confirm",
             "ESC: Quit");
         return true;
     }
@@ -250,8 +314,8 @@ bool Game::RenderFlowScreen(SdlPlatform& platform) const {
     case FlowState::Controls:
         DrawCenteredOverlay(platform, m_assets.Font(),
             "CONTROLS",
-            "WASD: Move   TAB: Debug UI",
-            "ENTER/ESC: Back");
+            "WASD: Move   TAB: Debug UI   MOUSE: Menus",
+            "ENTER/ESC/CLICK: Back");
         return true;
 
     case FlowState::Paused: {
@@ -259,7 +323,7 @@ bool Game::RenderFlowScreen(SdlPlatform& platform) const {
         DrawMenuOverlay(platform, m_assets.Font(),
             "PAUSED",
             items, 4, m_pauseMenuIndex,
-            "W/S: Move Cursor   ENTER: Select",
+            "W/S or MOUSE: Select   ENTER/CLICK: Confirm",
             "ESC: Resume");
         return true;
     }
@@ -269,7 +333,7 @@ bool Game::RenderFlowScreen(SdlPlatform& platform) const {
         DrawMenuOverlay(platform, m_assets.Font(),
             "QUIT GAME?",
             items, 2, m_quitMenuIndex,
-            "W/S: Change   ENTER: Select",
+            "W/S or MOUSE: Select   ENTER/CLICK: Confirm",
             "ESC: Back");
         return true;
     }

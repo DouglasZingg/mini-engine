@@ -84,6 +84,8 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     // Keep input history inside the platform so Pressed/Released works even though App creates SdlFrameData each loop.
     m_input.BeginFrame();
 
+    m_prevMouseLeftDown = m_mouseLeftDown;
+
     // ---- Timing ----
     const std::uint64_t now = static_cast<std::uint64_t>(SDL_GetPerformanceCounter());
     const std::uint64_t delta = now - m_prevCounter;
@@ -139,6 +141,9 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     m_input.SetKey(Key::Space, keys[SDL_SCANCODE_SPACE] != 0);
     m_input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
 
+    int mouseButtons = SDL_GetMouseState(&m_mouseX, &m_mouseY);
+    m_mouseLeftDown = (mouseButtons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+
     // Output a copy for this frame.
     outFrame.input = m_input;
 
@@ -160,6 +165,19 @@ void SdlPlatform::GetWindowSize(int& outW, int& outH) const {
     if (m_window) {
         SDL_GetWindowSize(m_window, &outW, &outH);
     }
+}
+
+void SdlPlatform::GetMousePosition(int& outX, int& outY) const {
+    outX = m_mouseX;
+    outY = m_mouseY;
+}
+
+bool SdlPlatform::MouseDownLeft() const {
+    return m_mouseLeftDown;
+}
+
+bool SdlPlatform::MousePressedLeft() const {
+    return m_mouseLeftDown && !m_prevMouseLeftDown;
 }
 
 void SdlPlatform::DrawSprite(const SdlTexture& tex, int x, int y) {

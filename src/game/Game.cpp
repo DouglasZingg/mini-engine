@@ -436,6 +436,7 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		};
 
 	std::vector<ProcRoom> rooms;
+	m_generatedRooms.clear();
 
 	// Central start room. This is your safe "party enters the dungeon floor" room.
 	ProcRoom startRoom{ width / 2 - 4, height / 2 - 3, 9, 7 };
@@ -644,9 +645,20 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 5;
 		if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
 	}
-	else {
+    else {
 		m_levelValidationMsg = "Dungeon floor generated from seed " + std::to_string(seed) + ".";
 	}
+
+    m_generatedRooms.clear();
+    if (reachable < 140) {
+        m_generatedRooms.push_back({ 4, 5, 8, 6 });
+        m_generatedRooms.push_back({ width / 2 - 4, height / 2 - 3, 9, 7 });
+        m_generatedRooms.push_back({ width - 12, height - 10, 8, 6 });
+    } else {
+        for (const auto& room : rooms) {
+            m_generatedRooms.push_back({ room.x, room.y, room.w, room.h });
+        }
+    }
 
 	return m_map.LoadFromData(width, height, tiles);
 }
@@ -730,6 +742,25 @@ void Game::RestartGame() {
 				enemy.homePos = center;
 				enemy.enemyKind = EnemyKind::Chaser;
 				enemy.moveSpeed = 0.0f; // uses m_enemySpeed
+
+                // Bind this enemy to the dungeon room it spawned in so patrol can stay inside that room.
+                enemy.homeRoomIndex = -1;
+                enemy.patrolMinTX = tx - enemy.patrolRadiusTiles;
+                enemy.patrolMinTY = ty - enemy.patrolRadiusTiles;
+                enemy.patrolMaxTX = tx + enemy.patrolRadiusTiles;
+                enemy.patrolMaxTY = ty + enemy.patrolRadiusTiles;
+                for (int ri = 0; ri < (int)m_generatedRooms.size(); ++ri) {
+                    const DungeonRoom& room = m_generatedRooms[ri];
+                    if (tx >= room.x && tx < room.x + room.w && ty >= room.y && ty < room.y + room.h) {
+                        enemy.homeRoomIndex = ri;
+                        enemy.homePos = m_map.TileToWorldCenter(room.x + room.w / 2, room.y + room.h / 2);
+                        enemy.patrolMinTX = room.x + 1;
+                        enemy.patrolMinTY = room.y + 1;
+                        enemy.patrolMaxTX = room.x + room.w - 2;
+                        enemy.patrolMaxTY = room.y + room.h - 2;
+                        break;
+                    }
+                }
 
 				if (tile == 8) { // Fast
 					enemy.enemyKind = EnemyKind::Fast;

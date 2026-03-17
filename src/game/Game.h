@@ -149,4 +149,6 @@ private:
         int w = 0;
         int h = 0;
     };
+
+    std::vector<DungeonRoom> m_generatedRooms;
 };

@@ -126,9 +126,34 @@ static float DistanceSq(const Vec2& a, const Vec2& b) {
 }
 
 
-static Vec2 PickPatrolTarget(const Entity& e, const Tilemap& map) {
-    const TileCoord home = map.WorldToTile(e.homePos);
 
+static Vec2 PickPatrolTarget(const Entity& e, const Tilemap& map) {
+    // If this enemy belongs to a generated room, keep patrol points inside that room.
+    if (e.homeRoomIndex >= 0 &&
+        e.patrolMinTX >= 0 && e.patrolMinTY >= 0 &&
+        e.patrolMaxTX >= e.patrolMinTX && e.patrolMaxTY >= e.patrolMinTY) {
+        for (int attempt = 0; attempt < 24; ++attempt) {
+            const std::uint32_t seedX =
+                e.id * 131u +
+                std::uint32_t(e.patrolStep * 53) +
+                std::uint32_t(attempt * 17);
+            const std::uint32_t seedY =
+                e.id * 193u +
+                std::uint32_t(e.patrolStep * 97) +
+                std::uint32_t(attempt * 29);
+
+            const int tx = e.patrolMinTX +
+                int(HashToUnitFloat(seedX) * float((e.patrolMaxTX - e.patrolMinTX) + 1));
+            const int ty = e.patrolMinTY +
+                int(HashToUnitFloat(seedY) * float((e.patrolMaxTY - e.patrolMinTY) + 1));
+
+            if (!map.IsSolidTile(tx, ty)) {
+                return map.TileToWorldCenter(tx, ty);
+            }
+        }
+    }
+
+    const TileCoord home = map.WorldToTile(e.homePos);
     for (int attempt = 0; attempt < 16; ++attempt) {
         const std::uint32_t seedA =
             e.id * 131u +
@@ -144,7 +169,6 @@ static Vec2 PickPatrolTarget(const Entity& e, const Tilemap& map) {
         const float radius01 = HashToUnitFloat(seedB);
 
         const float angle = angle01 * 6.28318530718f;
-
         const int radiusTiles = 1 + int(radius01 * float(std::max(1, e.patrolRadiusTiles)));
         const int tx = home.x + int(std::round(std::cos(angle) * float(radiusTiles)));
         const int ty = home.y + int(std::round(std::sin(angle) * float(radiusTiles)));
