@@ -128,7 +128,7 @@ static float DistanceSq(const Vec2& a, const Vec2& b) {
 
 
 static Vec2 PickPatrolTarget(const Entity& e, const Tilemap& map) {
-    // If this enemy belongs to a generated room, keep patrol points inside that room.
+    // Prefer patrol points inside the room this entity belongs to.
     if (e.homeRoomIndex >= 0 &&
         e.patrolMinTX >= 0 && e.patrolMinTY >= 0 &&
         e.patrolMaxTX >= e.patrolMinTX && e.patrolMaxTY >= e.patrolMinTY) {
@@ -432,6 +432,45 @@ void Game::ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, f
     }
 }
 
+
+void Game::HandleRoomRevealAndTraps(Entity& player, SdlPlatform& platform) {
+    const TileCoord playerTile = m_map.WorldToTile(player.pos);
+    const int tile = m_map.At(playerTile.x, playerTile.y);
+
+    if (tile == 10) {
+        for (DungeonRoom& room : m_generatedRooms) {
+            if (room.doorTX == playerTile.x && room.doorTY == playerTile.y && !room.revealed) {
+                room.revealed = true;
+                m_toastText = "ROOM REVEALED";
+                m_toastTimer = m_toastDuration;
+                SpawnFloatingText(player.pos, "REVEAL");
+                platform.PlayTone(500.0f, 0.10f, 0.18f);
+                m_map.SetAt(playerTile.x, playerTile.y, 0);
+                break;
+            }
+        }
+    } else if (tile == 11) {
+        // Trap only fires once, then becomes a spent trap tile.
+        m_map.SetAt(playerTile.x, playerTile.y, 12);
+        SpawnFloatingText(player.pos, "TRAP!");
+        m_toastText = "TRAP!";
+        m_toastTimer = m_toastDuration;
+        platform.PlayTone(140.0f, 0.12f, 0.20f);
+
+        if (player.invulnTimer <= 0.0f && m_shieldTimer <= 0.0f) {
+            player.health -= 1;
+            player.invulnTimer = m_iframesSeconds;
+            player.hitstun = m_hitstunSeconds;
+            m_damageFlashTimer = m_damageFlashDuration;
+            m_shakeDuration = 0.16f;
+            m_shakeTime = m_shakeDuration;
+            m_shakeStrength = 5.0f;
+        } else if (m_shieldTimer > 0.0f) {
+            m_shieldTimer = 0.0f;
+        }
+    }
+}
+
 void Game::HandlePickupCollisions(Entity& player, SdlPlatform& platform) {
     for (Entity& e : m_entities) {
         if (!e.active || e.type != EntityType::Pickup) continue;
@@ -599,6 +638,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     UpdateEnemies(player, fixedDt);
     ResolveEnemySeparation();
     ResolvePlayerEnemyCollisions(player, platform, fixedDt, dbg);
+    HandleRoomRevealAndTraps(player, platform);
     HandlePickupCollisions(player, platform);
 
     if (player.health <= 0) {

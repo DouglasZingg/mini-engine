@@ -28,7 +28,6 @@ public:
 
     void GetWindowSize(int& outW, int& outH) const;
     void GetMousePosition(int& outX, int& outY) const;
-    bool MouseDownLeft() const;
     bool MousePressedLeft() const;
     SDL_Renderer* RendererRaw() const { return m_renderer; }
     SDL_Window* WindowRaw() const { return m_window; }

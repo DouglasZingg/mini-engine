@@ -93,6 +93,13 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
             continue;
         }
 
+        if ((e.type == EntityType::Enemy || e.type == EntityType::Pickup) &&
+            e.homeRoomIndex >= 0 &&
+            e.homeRoomIndex < (int)m_generatedRooms.size() &&
+            !m_generatedRooms[e.homeRoomIndex].revealed) {
+            continue;
+        }
+
         if (e.type == EntityType::Pickup) {
             Vec2 screen = m_camera.WorldToScreen(e.pos);
             switch (e.pickupKind) {
@@ -145,6 +152,24 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
         }
     }
 
+
+
+// Hide the contents of unrevealed rooms until the player activates that room's door tile.
+for (const DungeonRoom& room : m_generatedRooms) {
+    if (room.revealed) continue;
+
+    for (int ty = room.y; ty < room.y + room.h; ++ty) {
+        for (int tx = room.x; tx < room.x + room.w; ++tx) {
+            if (tx == room.doorTX && ty == room.doorTY) continue;
+
+            const Vec2 worldCenter = m_map.TileToWorldCenter(tx, ty);
+            const Vec2 screenPos = m_camera.WorldToScreen(worldCenter);
+            const int drawX = (int)(screenPos.x - m_map.TileSize() * 0.5f);
+            const int drawY = (int)(screenPos.y - m_map.TileSize() * 0.5f);
+            platform.DrawFilledRect(drawX, drawY, m_map.TileSize(), m_map.TileSize(), 18, 18, 18);
+        }
+    }
+}
     DrawFloatingTexts(platform);
     DrawHUD(platform);
     DrawToast(platform);

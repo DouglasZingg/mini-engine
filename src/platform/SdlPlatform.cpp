@@ -83,7 +83,6 @@ void SdlPlatform::Shutdown() {
 bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     // Keep input history inside the platform so Pressed/Released works even though App creates SdlFrameData each loop.
     m_input.BeginFrame();
-
     m_prevMouseLeftDown = m_mouseLeftDown;
 
     // ---- Timing ----
@@ -170,10 +169,6 @@ void SdlPlatform::GetWindowSize(int& outW, int& outH) const {
 void SdlPlatform::GetMousePosition(int& outX, int& outY) const {
     outX = m_mouseX;
     outY = m_mouseY;
-}
-
-bool SdlPlatform::MouseDownLeft() const {
-    return m_mouseLeftDown;
 }
 
 bool SdlPlatform::MousePressedLeft() const {

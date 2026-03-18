@@ -118,10 +118,12 @@ void Tilemap::ResolveCircleCollision(Vec2& pos, float radius) const {
     }
 }
 
+
 void Tilemap::Render(SdlPlatform& platform, const Camera2D& camera) const {
     for (int y = 0; y < m_h; ++y) {
         for (int x = 0; x < m_w; ++x) {
-            if (At(x, y) != 1) {
+            const int tile = At(x, y);
+            if (tile == 0 || tile == 2 || tile == 3 || tile == 4 || tile == 5 || tile == 6 || tile == 7 || tile == 8 || tile == 9) {
                 continue;
             }
 
@@ -133,10 +135,22 @@ void Tilemap::Render(SdlPlatform& platform, const Camera2D& camera) const {
 
             const int drawX = static_cast<int>(screenPos.x - m_tileSize * 0.5f);
             const int drawY = static_cast<int>(screenPos.y - m_tileSize * 0.5f);
-            platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 60, 60, 60);
+
+            if (tile == 1) {
+                platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 60, 60, 60);
+            } else if (tile == 10) {
+                platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 110, 80, 30); // door/reveal switch
+                platform.DrawFilledRect(drawX + 18, drawY + 18, m_tileSize - 36, m_tileSize - 36, 180, 150, 70);
+            } else if (tile == 11) {
+                platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 120, 40, 40); // armed trap
+                platform.DrawFilledRect(drawX + 12, drawY + 12, m_tileSize - 24, m_tileSize - 24, 180, 70, 70);
+            } else if (tile == 12) {
+                platform.DrawFilledRect(drawX, drawY, m_tileSize, m_tileSize, 65, 35, 35); // spent trap
+            }
         }
     }
 }
+
 
 bool Tilemap::IsSolidTile(int tx, int ty) const {
     return At(tx, ty) == 1;

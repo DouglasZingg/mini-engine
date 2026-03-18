@@ -38,6 +38,13 @@ Entity& Game::CreateEntity(EntityType type, Vec2 pos, float radius) {
 	e.radius = radius;
 	e.ai = AIState::Idle;
 	e.aiTimer = 0.6f;
+	e.patrolStep = 0;
+	e.patrolRadiusTiles = 3;
+	e.homeRoomIndex = -1;
+	e.patrolMinTX = -1;
+	e.patrolMinTY = -1;
+	e.patrolMaxTX = -1;
+	e.patrolMaxTY = -1;
 	e.aggroRadius = 350.0f;
 	m_entities.push_back(e);
 	return m_entities.back();
@@ -515,16 +522,16 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 	const int playerY = roomCenterY(startRoom);
 	tiles[idx(playerX, playerY)] = 4;
 
-	auto classifyRoom = [&](size_t roomIndex) {
-		if (roomIndex == 0) return 0; // start
-		std::uniform_int_distribution<int> rollDist(0, 99);
-		int roll = rollDist(rng);
+    auto classifyRoom = [&](size_t roomIndex) {
+        if (roomIndex == 0) return RoomTag::Start;
+        std::uniform_int_distribution<int> rollDist(0, 99);
+        const int roll = rollDist(rng);
 
-		if (roll < 20) return 1; // empty
-		if (roll < 40) return 2; // reward
-		if (roll < 75) return 3; // mixed
-		return 4;                // combat
-		};
+        if (roll < 18) return RoomTag::Empty;
+        if (roll < 38) return RoomTag::Reward;
+        if (roll < 73) return RoomTag::Mixed;
+        return RoomTag::Combat;
+    };
 
 	int basicEnemies = 2 + levelIndex;
 	int basicPickups = 3 + levelIndex * 2;
@@ -552,14 +559,36 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		return n;
 		};
 
+    // Build room metadata now that the layout is fixed.
+    m_generatedRooms.clear();
+    for (size_t ri = 0; ri < rooms.size(); ++ri) {
+        DungeonRoom roomMeta{};
+        roomMeta.x = rooms[ri].x;
+        roomMeta.y = rooms[ri].y;
+        roomMeta.w = rooms[ri].w;
+        roomMeta.h = rooms[ri].h;
+        roomMeta.tag = classifyRoom(ri);
+        roomMeta.revealed = (ri == 0);
+
+        const int cx = rooms[ri].x + rooms[ri].w / 2;
+        const int cy = rooms[ri].y + rooms[ri].h / 2;
+        roomMeta.doorTX = cx;
+        roomMeta.doorTY = std::max(rooms[ri].y + 1, cy - 1);
+        if (ri != 0) {
+            tiles[idx(roomMeta.doorTX, roomMeta.doorTY)] = 10; // room reveal door tile
+        }
+
+        m_generatedRooms.push_back(roomMeta);
+    }
+
 	// Populate rooms by room role.
 	for (size_t ri = 1; ri < rooms.size(); ++ri) {
 		const ProcRoom& room = rooms[ri];
 		std::vector<std::pair<int, int>> used;
-		const int roomType = classifyRoom(ri);
+		const RoomTag roomType = m_generatedRooms[ri].tag;
 
-		if (roomType == 2 || roomType == 3) {
-			const int tokensHere = (roomType == 2) ? 1 : 1 + ((int)ri & 1);
+		if (roomType == RoomTag::Reward || roomType == RoomTag::Mixed) {
+			const int tokensHere = (roomType == RoomTag::Reward) ? 1 : 1 + ((int)ri & 1);
 			for (int i = 0; i < useCount(basicPickups, tokensHere); ++i) {
 				placeTileInRoom(room, 2, used, 4);
 			}
@@ -576,15 +605,15 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 				}
 			}
 
-			if (shieldCount > 0 && roomType == 2) {
+			if (shieldCount > 0 && roomType == RoomTag::Reward) {
 				for (int i = 0; i < useCount(shieldCount, 1); ++i) {
 					placeTileInRoom(room, 7, used, 8);
 				}
 			}
 		}
 
-		if (roomType == 3 || roomType == 4) {
-			const int baseEnemiesHere = (roomType == 4) ? 2 : 1;
+		if (roomType == RoomTag::Mixed || roomType == RoomTag::Combat) {
+			const int baseEnemiesHere = (roomType == RoomTag::Combat) ? 2 : 1;
 
 			for (int i = 0; i < useCount(basicEnemies, baseEnemiesHere); ++i) {
 				placeTileInRoom(room, 3, used, 8);
@@ -596,13 +625,21 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 				}
 			}
 
-			if (tankCount > 0 && room.w >= 7 && room.h >= 6) {
-				for (int i = 0; i < useCount(tankCount, 1); ++i) {
-					placeTileInRoom(room, 9, used, 10);
-				}
-			}
-		}
-	}
+            if (tankCount > 0 && room.w >= 7 && room.h >= 6) {
+                for (int i = 0; i < useCount(tankCount, 1); ++i) {
+                    placeTileInRoom(room, 9, used, 10);
+                }
+            }
+
+            // Add a one-shot trap tile sometimes in dangerous rooms.
+            std::uniform_int_distribution<int> trapRollDist(0, 99);
+            const bool placeTrap = (roomType == RoomTag::Combat && trapRollDist(rng) < 45) ||
+                                   (roomType == RoomTag::Mixed && trapRollDist(rng) < 28);
+            if (placeTrap) {
+                placeTileInRoom(room, 11, used, 8);
+            }
+        }
+    }
 
 	// Spill leftovers into non-start rooms if the random floor rolled too many empty rooms.
 	for (size_t ri = 1; ri < rooms.size() &&
@@ -622,45 +659,42 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 	}
 
 	const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
-	if (reachable < 140) {
-		m_levelValidationMsg = "Generated dungeon was too cramped. Using fallback floor.";
-
-		std::fill(tiles.begin(), tiles.end(), 1);
-
-		ProcRoom a{ 4, 5, 8, 6 };
-		ProcRoom b{ width / 2 - 4, height / 2 - 3, 9, 7 };
-		ProcRoom c{ width - 12, height - 10, 8, 6 };
-
-		carveRoom(a);
-		carveRoom(b);
-		carveRoom(c);
-
-		carveCorridor(roomCenterX(a), roomCenterY(a), roomCenterX(b), roomCenterY(b));
-		carveCorridor(roomCenterX(b), roomCenterY(b), roomCenterX(c), roomCenterY(c));
-
-		tiles[idx(roomCenterX(b), roomCenterY(b))] = 4;
-		tiles[idx(roomCenterX(a), roomCenterY(a))] = 2;
-		tiles[idx(roomCenterX(c), roomCenterY(c))] = 3;
-
-		if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 5;
-		if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
-	}
-    else {
-		m_levelValidationMsg = "Dungeon floor generated from seed " + std::to_string(seed) + ".";
-	}
-
-    m_generatedRooms.clear();
     if (reachable < 140) {
-        m_generatedRooms.push_back({ 4, 5, 8, 6 });
-        m_generatedRooms.push_back({ width / 2 - 4, height / 2 - 3, 9, 7 });
-        m_generatedRooms.push_back({ width - 12, height - 10, 8, 6 });
-    } else {
-        for (const auto& room : rooms) {
-            m_generatedRooms.push_back({ room.x, room.y, room.w, room.h });
-        }
+        m_levelValidationMsg = "Generated dungeon was too cramped. Using fallback floor.";
+
+        std::fill(tiles.begin(), tiles.end(), 1);
+        m_generatedRooms.clear();
+
+        ProcRoom a{ 4, 5, 8, 6 };
+        ProcRoom b{ width / 2 - 4, height / 2 - 3, 9, 7 };
+        ProcRoom c{ width - 12, height - 10, 8, 6 };
+
+        carveRoom(a);
+        carveRoom(b);
+        carveRoom(c);
+
+        carveCorridor(roomCenterX(a), roomCenterY(a), roomCenterX(b), roomCenterY(b));
+        carveCorridor(roomCenterX(b), roomCenterY(b), roomCenterX(c), roomCenterY(c));
+
+        tiles[idx(roomCenterX(b), roomCenterY(b))] = 4;
+        tiles[idx(roomCenterX(a), roomCenterY(a))] = 2;
+        tiles[idx(roomCenterX(c), roomCenterY(c))] = 3;
+        tiles[idx(roomCenterX(a), roomCenterY(a) - 1)] = 10;
+        tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 10;
+        tiles[idx(roomCenterX(c), roomCenterY(c) + 1)] = 11;
+
+        if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 2)] = 5;
+        if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
+
+        m_generatedRooms.push_back({ a.x, a.y, a.w, a.h, RoomTag::Reward, false, roomCenterX(a), roomCenterY(a)-1 });
+        m_generatedRooms.push_back({ b.x, b.y, b.w, b.h, RoomTag::Start, true, -1, -1 });
+        m_generatedRooms.push_back({ c.x, c.y, c.w, c.h, RoomTag::Combat, false, roomCenterX(c), roomCenterY(c)-1 });
+    }
+    else {
+        m_levelValidationMsg = "Dungeon floor generated from seed " + std::to_string(seed) + ".";
     }
 
-	return m_map.LoadFromData(width, height, tiles);
+    return m_map.LoadFromData(width, height, tiles);
 }
 
 
@@ -735,29 +769,25 @@ void Game::RestartGame() {
 				}
 			}
 
-			if (tile == 3 || tile == 8 || tile == 9) {
-				Vec2 center = m_map.TileToWorldCenter(tx, ty);
+            if (tile == 3 || tile == 8 || tile == 9) {
+                Vec2 center = m_map.TileToWorldCenter(tx, ty);
 
-				Entity& enemy = CreateEntity(EntityType::Enemy, center, 14.0f);
-				enemy.homePos = center;
-				enemy.enemyKind = EnemyKind::Chaser;
-				enemy.moveSpeed = 0.0f; // uses m_enemySpeed
+                Entity& enemy = CreateEntity(EntityType::Enemy, center, 14.0f);
+                enemy.homePos = center;
+                enemy.enemyKind = EnemyKind::Chaser;
+                enemy.moveSpeed = 0.0f; // uses m_enemySpeed
 
-                // Bind this enemy to the dungeon room it spawned in so patrol can stay inside that room.
-                enemy.homeRoomIndex = -1;
-                enemy.patrolMinTX = tx - enemy.patrolRadiusTiles;
-                enemy.patrolMinTY = ty - enemy.patrolRadiusTiles;
-                enemy.patrolMaxTX = tx + enemy.patrolRadiusTiles;
-                enemy.patrolMaxTY = ty + enemy.patrolRadiusTiles;
                 for (int ri = 0; ri < (int)m_generatedRooms.size(); ++ri) {
                     const DungeonRoom& room = m_generatedRooms[ri];
                     if (tx >= room.x && tx < room.x + room.w && ty >= room.y && ty < room.y + room.h) {
                         enemy.homeRoomIndex = ri;
                         enemy.homePos = m_map.TileToWorldCenter(room.x + room.w / 2, room.y + room.h / 2);
+                        enemy.patrolTarget = enemy.homePos;
                         enemy.patrolMinTX = room.x + 1;
                         enemy.patrolMinTY = room.y + 1;
                         enemy.patrolMaxTX = room.x + room.w - 2;
                         enemy.patrolMaxTY = room.y + room.h - 2;
+                        enemy.patrolRadiusTiles = std::max(1, std::min(room.w, room.h) / 2 - 1);
                         break;
                     }
                 }

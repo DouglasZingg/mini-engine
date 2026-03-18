@@ -44,6 +44,7 @@ private:
     void ResolveEnemySeparation();
     void ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, float fixedDt, DebugState& dbg);
     void HandlePickupCollisions(Entity& player, SdlPlatform& platform);
+    void HandleRoomRevealAndTraps(Entity& player, SdlPlatform& platform);
 
     // Screen-space helpers
     void DrawWorldGrid(SdlPlatform& platform) const;
@@ -142,12 +143,18 @@ private:
     int m_quitMenuIndex = 0;
     FlowState m_quitReturnState = FlowState::Paused;
 
+    enum class RoomTag { Start, Combat, Reward, Mixed, Empty };
+
     // Procedural dungeon room description.
     struct DungeonRoom {
         int x = 0;
         int y = 0;
         int w = 0;
         int h = 0;
+        RoomTag tag = RoomTag::Empty;
+        bool revealed = false;
+        int doorTX = -1;
+        int doorTY = -1;
     };
 
     std::vector<DungeonRoom> m_generatedRooms;
