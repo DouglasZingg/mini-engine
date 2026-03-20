@@ -65,6 +65,36 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 
     m_map.Render(platform, m_camera);
 
+if (dbg.showRoomBounds || dbg.showRoomLabels) {
+    const int tileSize = m_map.TileSize();
+    for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
+        const DungeonRoom& room = m_generatedRooms[i];
+        const Vec2 topLeftWorld{ float(room.x * tileSize), float(room.y * tileSize) };
+        const Vec2 bottomRightWorld{ float((room.x + room.w) * tileSize), float((room.y + room.h) * tileSize) };
+        const Vec2 a = m_camera.WorldToScreen(topLeftWorld);
+        const Vec2 b = m_camera.WorldToScreen(bottomRightWorld);
+
+        const int rx = (int)a.x;
+        const int ry = (int)a.y;
+        const int rw = (int)(b.x - a.x);
+        const int rh = (int)(b.y - a.y);
+
+        if (dbg.showRoomBounds) {
+            platform.DrawLine(rx, ry, rx + rw, ry);
+            platform.DrawLine(rx + rw, ry, rx + rw, ry + rh);
+            platform.DrawLine(rx + rw, ry + rh, rx, ry + rh);
+            platform.DrawLine(rx, ry + rh, rx, ry);
+        }
+
+        if (dbg.showRoomLabels) {
+            char label[32];
+            std::snprintf(label, sizeof(label), "ROOM %d", (int)i);
+            platform.DrawTextBMP(m_assets.Font(), rx + 4, ry + 4, label, 8, 8, 16, 32, 1);
+        }
+    }
+}
+
+
     if (m_stunPulseTimer > 0.0f) {
         const float pulseT = 1.0f - (m_stunPulseTimer / std::max(0.001f, m_stunPulseDuration));
         const float ringA = 20.0f + (m_stunRadius * pulseT);
@@ -93,13 +123,6 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
             continue;
         }
 
-        if ((e.type == EntityType::Enemy || e.type == EntityType::Pickup) &&
-            e.homeRoomIndex >= 0 &&
-            e.homeRoomIndex < (int)m_generatedRooms.size() &&
-            !m_generatedRooms[e.homeRoomIndex].revealed) {
-            continue;
-        }
-
         if (e.type == EntityType::Pickup) {
             Vec2 screen = m_camera.WorldToScreen(e.pos);
             switch (e.pickupKind) {
@@ -112,7 +135,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
             continue;
         }
 
-        if (dbg.showUI && dbg.showPaths && e.type == EntityType::Enemy) {
+        if (dbg.showPaths && e.type == EntityType::Enemy) {
             for (int i = e.path.index; i + 1 < (int)e.path.waypoints.size(); ++i) {
                 Vec2 a = m_camera.WorldToScreen(e.path.waypoints[i]);
                 Vec2 b = m_camera.WorldToScreen(e.path.waypoints[i + 1]);
@@ -133,68 +156,22 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
 
         platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
 
+        if (dbg.showEnemyStateText) {
+            const char* stateText = (e.ai == AIState::Seek) ? "SEEK" : "IDLE";
+            platform.DrawTextBMP(m_assets.Font(), drawX - 4, drawY - 12, stateText, 8, 8, 16, 32, 1);
+        }
+
         if (e.stunTimer > 0.0f) {
             platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
         }
-
-        if (dbg.showUI && e.type == EntityType::Enemy) {
-            const char* stateText = "IDLE";
-            switch (e.ai) {
-            case AIState::Patrol:     stateText = "PATROL"; break;
-            case AIState::Alert:      stateText = "ALERT"; break;
-            case AIState::Seek:       stateText = "SEEK"; break;
-            case AIState::ReturnHome: stateText = "RETURN"; break;
-            case AIState::Stunned:    stateText = "STUN"; break;
-            default: break;
-            }
-
-            platform.DrawTextBMP(m_assets.Font(), drawX - 8, drawY - 22, stateText, 8, 8, 16, 32, 1);
-        }
     }
 
-
-
-// Hide the contents of unrevealed rooms until the player activates that room's door tile.
-for (const DungeonRoom& room : m_generatedRooms) {
-    if (room.revealed) continue;
-
-    for (int ty = room.y; ty < room.y + room.h; ++ty) {
-        for (int tx = room.x; tx < room.x + room.w; ++tx) {
-            if (tx == room.doorTX && ty == room.doorTY) continue;
-
-            const Vec2 worldCenter = m_map.TileToWorldCenter(tx, ty);
-            const Vec2 screenPos = m_camera.WorldToScreen(worldCenter);
-            const int drawX = (int)(screenPos.x - m_map.TileSize() * 0.5f);
-            const int drawY = (int)(screenPos.y - m_map.TileSize() * 0.5f);
-            platform.DrawFilledRect(drawX, drawY, m_map.TileSize(), m_map.TileSize(), 18, 18, 18);
-        }
-    }
-}
-    DrawFloatingTexts(platform);
     DrawHUD(platform);
     DrawToast(platform);
     DrawDamageFlash(platform);
 
     if (!m_levelValidationMsg.empty()) {
         platform.DrawTextBMP(m_assets.Font(), 16, 16, m_levelValidationMsg.c_str(), 8, 8, 16, 32, 2);
-    }
-}
-
-
-void Game::DrawFloatingTexts(SdlPlatform& platform) const
-{
-    if (m_floatingTexts.empty()) return;
-
-    const int glyphW = 8, glyphH = 8, cols = 16;
-    for (const FloatingText& ft : m_floatingTexts) {
-        Vec2 screen = m_camera.WorldToScreen(ft.worldPos);
-        const int textW = static_cast<int>(ft.text.size()) * glyphW * 2;
-        const int x = static_cast<int>(screen.x) - textW / 2;
-        const int y = static_cast<int>(screen.y);
-
-        // Small shadow first so the text is readable against any floor color.
-        platform.DrawTextBMP(m_assets.Font(), x + 2, y + 2, ft.text.c_str(), glyphW, glyphH, cols, 32, 2);
-        platform.DrawTextBMP(m_assets.Font(), x, y, ft.text.c_str(), glyphW, glyphH, cols, 32, 2);
     }
 }
 

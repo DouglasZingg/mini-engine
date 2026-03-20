@@ -24,19 +24,6 @@ static void SeparateEntities(Entity& a, Entity& b) {
 	b.pos = b.pos - n * (penetration * 0.5f);
 }
 
-void Game::SpawnFloatingText(const Vec2& worldPos, const char* text) {
-    if (!text || !*text) return;
-    if (m_floatingTexts.size() >= 32) {
-        m_floatingTexts.erase(m_floatingTexts.begin());
-    }
-
-    FloatingText ft{};
-    ft.worldPos = worldPos;
-    ft.timer = ft.duration;
-    ft.text = text;
-    m_floatingTexts.push_back(ft);
-}
-
 void Game::UpdateRuntimeTimers(float fixedDt) {
     auto tickToZero = [fixedDt](float& value) {
         if (value > 0.0f) {
@@ -55,16 +42,6 @@ void Game::UpdateRuntimeTimers(float fixedDt) {
     for (Entity& e : m_entities) {
         if (!e.active) continue;
         tickToZero(e.stunTimer);
-    }
-
-    for (auto it = m_floatingTexts.begin(); it != m_floatingTexts.end();) {
-        it->timer -= fixedDt;
-        it->worldPos.y -= it->riseSpeed * fixedDt;
-        if (it->timer <= 0.0f) {
-            it = m_floatingTexts.erase(it);
-        } else {
-            ++it;
-        }
     }
 }
 
@@ -97,282 +74,73 @@ void Game::UpdatePlayer(Entity& player, const Input& input, float fixedDt) {
     m_map.ResolveCircleCollision(player.pos, player.radius);
 }
 
-
-static void ClearEnemyPath(Entity& e) {
-    e.path.waypoints.clear();
-    e.path.index = 0;
-    e.path.repathTimer = 0.0f;
-    e.path.lastGoalTX = 999999;
-    e.path.lastGoalTY = 999999;
-}
-
-static float EnemyMoveSpeed(const Entity& e, float defaultSpeed) {
-    return (e.moveSpeed > 0.0f) ? e.moveSpeed : defaultSpeed;
-}
-
-static float HashToUnitFloat(std::uint32_t seed) {
-    seed ^= 2747636419u;
-    seed *= 2654435769u;
-    seed ^= seed >> 16;
-    seed *= 2654435769u;
-    seed ^= seed >> 16;
-    return (seed & 0x00FFFFFFu) / 16777215.0f;
-}
-
-static float DistanceSq(const Vec2& a, const Vec2& b) {
-    const float dx = a.x - b.x;
-    const float dy = a.y - b.y;
-    return dx * dx + dy * dy;
-}
-
-
-
-static Vec2 PickPatrolTarget(const Entity& e, const Tilemap& map) {
-    // Prefer patrol points inside the room this entity belongs to.
-    if (e.homeRoomIndex >= 0 &&
-        e.patrolMinTX >= 0 && e.patrolMinTY >= 0 &&
-        e.patrolMaxTX >= e.patrolMinTX && e.patrolMaxTY >= e.patrolMinTY) {
-        for (int attempt = 0; attempt < 24; ++attempt) {
-            const std::uint32_t seedX =
-                e.id * 131u +
-                std::uint32_t(e.patrolStep * 53) +
-                std::uint32_t(attempt * 17);
-            const std::uint32_t seedY =
-                e.id * 193u +
-                std::uint32_t(e.patrolStep * 97) +
-                std::uint32_t(attempt * 29);
-
-            const int tx = e.patrolMinTX +
-                int(HashToUnitFloat(seedX) * float((e.patrolMaxTX - e.patrolMinTX) + 1));
-            const int ty = e.patrolMinTY +
-                int(HashToUnitFloat(seedY) * float((e.patrolMaxTY - e.patrolMinTY) + 1));
-
-            if (!map.IsSolidTile(tx, ty)) {
-                return map.TileToWorldCenter(tx, ty);
-            }
-        }
-    }
-
-    const TileCoord home = map.WorldToTile(e.homePos);
-    for (int attempt = 0; attempt < 16; ++attempt) {
-        const std::uint32_t seedA =
-            e.id * 131u +
-            std::uint32_t(e.patrolStep * 53) +
-            std::uint32_t(attempt * 17);
-
-        const std::uint32_t seedB =
-            e.id * 193u +
-            std::uint32_t(e.patrolStep * 97) +
-            std::uint32_t(attempt * 29);
-
-        const float angle01 = HashToUnitFloat(seedA);
-        const float radius01 = HashToUnitFloat(seedB);
-
-        const float angle = angle01 * 6.28318530718f;
-        const int radiusTiles = 1 + int(radius01 * float(std::max(1, e.patrolRadiusTiles)));
-        const int tx = home.x + int(std::round(std::cos(angle) * float(radiusTiles)));
-        const int ty = home.y + int(std::round(std::sin(angle) * float(radiusTiles)));
-
-        if (!map.IsSolidTile(tx, ty)) {
-            return map.TileToWorldCenter(tx, ty);
-        }
-    }
-
-    return e.homePos;
-}
-
-
-static void MoveEnemyDirect(Entity& e, const Vec2& target, float moveSpeed, float fixedDt) {
-    Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
-    const float distSq = to.x * to.x + to.y * to.y;
-    if (distSq <= 0.0001f) {
-        e.vel = { 0.0f, 0.0f };
-        return;
-    }
-
-    const float invLen = 1.0f / std::sqrt(distSq);
-    const Vec2 dir{ to.x * invLen, to.y * invLen };
-    e.vel = dir * moveSpeed;
-    e.pos = e.pos + e.vel * fixedDt;
-}
-
-static void RebuildEnemyPathTo(Entity& e, const Tilemap& map, const Vec2& targetWorld) {
-    const TileCoord startT = map.WorldToTile(e.pos);
-    const TileCoord goalT = map.WorldToTile(targetWorld);
-    const auto tiles = Pathfinding::AStar(map, startT, goalT);
-
-    e.path.waypoints.clear();
-    e.path.index = 0;
-    for (const TileCoord& tile : tiles) {
-        e.path.waypoints.push_back(map.TileToWorldCenter(tile.x, tile.y));
-    }
-    if (e.path.waypoints.size() > 1) {
-        e.path.index = 1;
-    }
-
-    e.path.lastGoalTX = goalT.x;
-    e.path.lastGoalTY = goalT.y;
-}
-
-static void MoveEnemyOnPath(Entity& e, float moveSpeed, float fixedDt) {
-    constexpr float kWaypointReach = 8.0f;
-
-    if (e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size()) {
-        e.vel = { 0.0f, 0.0f };
-        return;
-    }
-
-    const Vec2 target = e.path.waypoints[e.path.index];
-    const Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
-    const float distSq = to.x * to.x + to.y * to.y;
-
-    if (distSq < kWaypointReach * kWaypointReach) {
-        e.path.index++;
-        e.vel = { 0.0f, 0.0f };
-        return;
-    }
-
-    const float invLen = 1.0f / std::sqrt(std::max(distSq, 0.0001f));
-    const Vec2 dir{ to.x * invLen, to.y * invLen };
-    e.vel = dir * moveSpeed;
-    e.pos = e.pos + e.vel * fixedDt;
-}
-
 void Game::UpdateEnemies(const Entity& player, float fixedDt) {
-    constexpr float kAlertDuration = 0.18f;
-    constexpr float kReturnHomeReach = 18.0f;
-    constexpr float kPatrolReach = 14.0f;
-    constexpr float kDirectSeekRange = 120.0f;
-
     for (Entity& e : m_entities) {
         if (!e.active || e.type != EntityType::Enemy) continue;
+        if (e.stunTimer > 0.0f) continue;
 
         e.prevPos = e.pos;
-        e.vel = { 0.0f, 0.0f };
 
-        const float enemySpeed = EnemyMoveSpeed(e, m_enemySpeed);
-        const float distToPlayerSq = DistanceSq(e.pos, player.pos);
-        const float aggroSq = e.aggroRadius * e.aggroRadius;
-
-        // Stun always wins over every other state.
         if (e.stunTimer > 0.0f) {
-            e.ai = AIState::Stunned;
-            ClearEnemyPath(e);
+            e.vel = { 0.0f, 0.0f };
             continue;
         }
-        if (e.ai == AIState::Stunned) {
-            e.ai = AIState::ReturnHome;
-            e.aiTimer = 0.0f;
-            ClearEnemyPath(e);
+
+        Vec2 toPlayer = player.pos - e.pos;
+        float distSq = toPlayer.x * toPlayer.x + toPlayer.y * toPlayer.y;
+        float aggroSq = e.aggroRadius * e.aggroRadius;
+
+        if (e.ai == AIState::Idle && distSq <= aggroSq) e.ai = AIState::Seek;
+        else if (e.ai == AIState::Seek && distSq > aggroSq * 1.2f) e.ai = AIState::Idle;
+
+        if (e.ai != AIState::Seek || distSq <= 0.0001f) continue;
+
+        const float repathInterval = 0.25f;
+        const float waypointReach = 8.0f;
+        const float enemySpeed = (e.moveSpeed > 0.0f) ? e.moveSpeed : m_enemySpeed;
+
+        TileCoord goalT = m_map.WorldToTile(player.pos);
+        e.path.repathTimer -= fixedDt;
+
+        bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
+        bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
+
+        if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
+            TileCoord startT = m_map.WorldToTile(e.pos);
+            auto tiles = Pathfinding::AStar(m_map, startT, goalT);
+
+            e.path.waypoints.clear();
+            e.path.index = 0;
+
+            for (const TileCoord& tile : tiles) {
+                e.path.waypoints.push_back(m_map.TileToWorldCenter(tile.x, tile.y));
+            }
+            if (e.path.waypoints.size() > 1) {
+                e.path.index = 1;
+            }
+
+            e.path.repathTimer = repathInterval;
+            e.path.lastGoalTX = goalT.x;
+            e.path.lastGoalTY = goalT.y;
         }
 
-        const bool playerInAggro = distToPlayerSq <= aggroSq;
+        if (!e.path.waypoints.empty() && e.path.index < (int)e.path.waypoints.size()) {
+            Vec2 target = e.path.waypoints[e.path.index];
+            Vec2 to{ target.x - e.pos.x, target.y - e.pos.y };
 
-        // Any calm state can become Alert when the player is detected.
-        if (playerInAggro && e.ai != AIState::Seek && e.ai != AIState::Alert) {
-            e.ai = AIState::Alert;
-            e.aiTimer = kAlertDuration;
-            ClearEnemyPath(e);
-        }
-
-        switch (e.ai) {
-        case AIState::Idle: {
-            e.aiTimer -= fixedDt;
-            if (e.aiTimer <= 0.0f) {
-                e.patrolStep++;
-                e.patrolTarget = PickPatrolTarget(e, m_map);
-                e.ai = AIState::Patrol;
-                e.aiTimer = 1.25f + HashToUnitFloat(e.id * 43u + std::uint32_t(e.patrolStep * 11)) * 0.75f;
+            float pathDistSq = to.x * to.x + to.y * to.y;
+            if (pathDistSq < waypointReach * waypointReach) {
+                e.path.index++;
             }
-            break;
-        }
+            else if (pathDistSq > 0.0001f) {
+                float invLen = 1.0f / std::sqrt(pathDistSq);
+                Vec2 dir{ to.x * invLen, to.y * invLen };
 
-        case AIState::Patrol: {
-            e.aiTimer -= fixedDt;
-
-            if (DistanceSq(e.pos, e.patrolTarget) <= kPatrolReach * kPatrolReach || e.aiTimer <= 0.0f) {
-                e.ai = AIState::Idle;
-                e.aiTimer = 0.5f + HashToUnitFloat(e.id * 97u + std::uint32_t(e.patrolStep * 7)) * 0.8f;
-                e.vel = {0.0f,0.0f};
-                break;
+                e.pos = Vec2{
+                    e.pos.x + dir.x * (enemySpeed * fixedDt),
+                    e.pos.y + dir.y * (enemySpeed * fixedDt)
+                };
             }
-
-            const TileCoord patrolTile = m_map.WorldToTile(e.patrolTarget);
-            if (m_map.IsSolidTile(patrolTile.x, patrolTile.y)) {
-                e.patrolTarget = e.homePos;
-            }
-
-            MoveEnemyDirect(e, e.patrolTarget, enemySpeed * 0.65f, fixedDt);
-            break;
-        }
-
-        case AIState::Alert: {
-            e.aiTimer -= fixedDt;
-            if (!playerInAggro) {
-                e.ai = AIState::ReturnHome;
-                ClearEnemyPath(e);
-                break;
-            }
-            if (e.aiTimer <= 0.0f) {
-                e.ai = AIState::Seek;
-                ClearEnemyPath(e);
-            }
-            break;
-        }
-
-        case AIState::Seek: {
-            if (!playerInAggro && distToPlayerSq > aggroSq * 1.35f) {
-                e.ai = AIState::ReturnHome;
-                ClearEnemyPath(e);
-                break;
-            }
-
-            if (distToPlayerSq <= kDirectSeekRange * kDirectSeekRange) {
-                MoveEnemyDirect(e, player.pos, enemySpeed, fixedDt);
-                break;
-            }
-
-            const float repathInterval = (e.enemyKind == EnemyKind::Fast) ? 0.18f :
-                                         (e.enemyKind == EnemyKind::Tank) ? 0.34f : 0.25f;
-            const float repathJitter = HashToUnitFloat(e.id * 211u) * 0.05f;
-
-            const TileCoord goalT = m_map.WorldToTile(player.pos);
-            e.path.repathTimer -= fixedDt;
-
-            const bool goalChanged = (goalT.x != e.path.lastGoalTX || goalT.y != e.path.lastGoalTY);
-            const bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
-
-            if (e.path.repathTimer <= 0.0f && (goalChanged || needPath)) {
-                RebuildEnemyPathTo(e, m_map, player.pos);
-                e.path.repathTimer = repathInterval + repathJitter;
-            }
-
-            MoveEnemyOnPath(e, enemySpeed, fixedDt);
-            break;
-        }
-
-        case AIState::ReturnHome: {
-            if (DistanceSq(e.pos, e.homePos) <= kReturnHomeReach * kReturnHomeReach) {
-                e.ai = AIState::Idle;
-                e.aiTimer = 0.4f + HashToUnitFloat(e.id * 313u) * 0.8f;
-                ClearEnemyPath(e);
-                break;
-            }
-
-            e.path.repathTimer -= fixedDt;
-            const bool needPath = e.path.waypoints.empty() || e.path.index >= (int)e.path.waypoints.size();
-            if (e.path.repathTimer <= 0.0f || needPath) {
-                RebuildEnemyPathTo(e, m_map, e.homePos);
-                e.path.repathTimer = 0.30f + HashToUnitFloat(e.id * 17u) * 0.05f;
-            }
-
-            MoveEnemyOnPath(e, enemySpeed * 0.85f, fixedDt);
-            break;
-        }
-
-        case AIState::Stunned:
-            // handled above
-            break;
         }
 
         m_map.ResolveCircleCollision(e.pos, e.radius);
@@ -390,7 +158,7 @@ void Game::ResolveEnemySeparation() {
     }
 }
 
-void Game::ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, float fixedDt, DebugState& dbg) {
+void Game::ResolvePlayerEnemyCollisions(Entity& player, float fixedDt, DebugState& dbg) {
     (void)fixedDt;
 
     for (size_t i = 0; i < m_entities.size(); ++i) {
@@ -398,7 +166,6 @@ void Game::ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, f
 
         Entity& e = m_entities[i];
         if (!e.active || e.type != EntityType::Enemy) continue;
-        if (e.stunTimer > 0.0f) continue; // stunned enemies cannot damage the player
 
         if (CheckCollision(player, e)) {
             SeparateEntities(player, e);
@@ -408,8 +175,6 @@ void Game::ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, f
                 m_damageFlashTimer = m_damageFlashDuration;
                 m_toastText = "HIT!";
                 m_toastTimer = m_toastDuration;
-                SpawnFloatingText(player.pos, "HIT!");
-                platform.PlayTone(180.0f, 0.12f, 0.22f);
                 player.invulnTimer = m_iframesSeconds;
                 player.hitstun = m_hitstunSeconds;
 
@@ -432,46 +197,7 @@ void Game::ResolvePlayerEnemyCollisions(Entity& player, SdlPlatform& platform, f
     }
 }
 
-
-void Game::HandleRoomRevealAndTraps(Entity& player, SdlPlatform& platform) {
-    const TileCoord playerTile = m_map.WorldToTile(player.pos);
-    const int tile = m_map.At(playerTile.x, playerTile.y);
-
-    if (tile == 10) {
-        for (DungeonRoom& room : m_generatedRooms) {
-            if (room.doorTX == playerTile.x && room.doorTY == playerTile.y && !room.revealed) {
-                room.revealed = true;
-                m_toastText = "ROOM REVEALED";
-                m_toastTimer = m_toastDuration;
-                SpawnFloatingText(player.pos, "REVEAL");
-                platform.PlayTone(500.0f, 0.10f, 0.18f);
-                m_map.SetAt(playerTile.x, playerTile.y, 0);
-                break;
-            }
-        }
-    } else if (tile == 11) {
-        // Trap only fires once, then becomes a spent trap tile.
-        m_map.SetAt(playerTile.x, playerTile.y, 12);
-        SpawnFloatingText(player.pos, "TRAP!");
-        m_toastText = "TRAP!";
-        m_toastTimer = m_toastDuration;
-        platform.PlayTone(140.0f, 0.12f, 0.20f);
-
-        if (player.invulnTimer <= 0.0f && m_shieldTimer <= 0.0f) {
-            player.health -= 1;
-            player.invulnTimer = m_iframesSeconds;
-            player.hitstun = m_hitstunSeconds;
-            m_damageFlashTimer = m_damageFlashDuration;
-            m_shakeDuration = 0.16f;
-            m_shakeTime = m_shakeDuration;
-            m_shakeStrength = 5.0f;
-        } else if (m_shieldTimer > 0.0f) {
-            m_shieldTimer = 0.0f;
-        }
-    }
-}
-
-void Game::HandlePickupCollisions(Entity& player, SdlPlatform& platform) {
+void Game::HandlePickupCollisions(Entity& player) {
     for (Entity& e : m_entities) {
         if (!e.active || e.type != EntityType::Pickup) continue;
         if (!CheckCollision(player, e)) continue;
@@ -483,8 +209,6 @@ void Game::HandlePickupCollisions(Entity& player, SdlPlatform& platform) {
             m_tokensCollected += 1;
             m_toastText = "+TOKEN";
             m_toastTimer = m_toastDuration;
-            SpawnFloatingText(e.pos, "+TOKEN");
-            platform.PlayTone(740.0f, 0.08f, 0.18f);
             if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
             m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
             if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
@@ -496,13 +220,9 @@ void Game::HandlePickupCollisions(Entity& player, SdlPlatform& platform) {
             if (player.health < m_playerMaxHealth) {
                 player.health += 1;
                 m_toastText = "+HEALTH";
-                SpawnFloatingText(e.pos, "+HEALTH");
-                platform.PlayTone(540.0f, 0.10f, 0.18f);
             }
             else {
                 m_toastText = "HEALTH FULL";
-                SpawnFloatingText(e.pos, "FULL");
-                platform.PlayTone(260.0f, 0.07f, 0.14f);
             }
             m_toastTimer = m_toastDuration;
             break;
@@ -511,16 +231,12 @@ void Game::HandlePickupCollisions(Entity& player, SdlPlatform& platform) {
             m_speedBuffTimer = m_speedBuffDuration;
             m_toastText = "+SPEED";
             m_toastTimer = m_toastDuration;
-            SpawnFloatingText(e.pos, "+SPEED");
-            platform.PlayTone(880.0f, 0.09f, 0.18f);
             break;
 
         case PickupKind::Shield:
             m_shieldTimer = m_shieldDuration;
             m_toastText = "+SHIELD";
             m_toastTimer = m_toastDuration;
-            SpawnFloatingText(e.pos, "+SHIELD");
-            platform.PlayTone(620.0f, 0.10f, 0.18f);
             break;
 
         default:
@@ -552,7 +268,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
         tickCombatTimers(e);
     }
 
-    if (UpdateFlowScreens(platform, input, dbg)) {
+    if (UpdateFlowScreens(input, dbg)) {
         return;
     }
 
@@ -587,6 +303,10 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
         return;
     }
 
+    if (dbg.requestSpawnChaser) { dbg.requestSpawnChaser = false; SpawnDebugEnemyNearPlayer(EnemyKind::Chaser); }
+    if (dbg.requestSpawnFast)   { dbg.requestSpawnFast = false;   SpawnDebugEnemyNearPlayer(EnemyKind::Fast); }
+    if (dbg.requestSpawnTank)   { dbg.requestSpawnTank = false;   SpawnDebugEnemyNearPlayer(EnemyKind::Tank); }
+
     if (dbg.playerMaxHealth < 1) dbg.playerMaxHealth = 1;
     if (dbg.playerMaxHealth > 10) dbg.playerMaxHealth = 10;
     if (dbg.invulnSeconds < 0.05f) dbg.invulnSeconds = 0.05f;
@@ -596,7 +316,7 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
 
     m_playerMaxHealth = dbg.playerMaxHealth;
     m_invulnSeconds = dbg.invulnSeconds;
-    m_knockbackStrength = dbg.hitKnockback;
+    m_hitKnockback = dbg.hitKnockback;
 
     if (player.health > m_playerMaxHealth) player.health = m_playerMaxHealth;
     player.invulnDuration = m_invulnSeconds;
@@ -613,8 +333,6 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
         m_stunPulseTimer = m_stunPulseDuration;
         m_toastText = "STUN!";
         m_toastTimer = m_toastDuration;
-        SpawnFloatingText(player.pos, "STUN!");
-        platform.PlayTone(320.0f, 0.14f, 0.22f);
 
         const float stunRadiusSq = m_stunRadius * m_stunRadius;
         for (Entity& e : m_entities) {
@@ -637,9 +355,8 @@ void Game::Update(SdlPlatform& platform, const Input& input, float fixedDt, Debu
     }
     UpdateEnemies(player, fixedDt);
     ResolveEnemySeparation();
-    ResolvePlayerEnemyCollisions(player, platform, fixedDt, dbg);
-    HandleRoomRevealAndTraps(player, platform);
-    HandlePickupCollisions(player, platform);
+    ResolvePlayerEnemyCollisions(player, fixedDt, dbg);
+    HandlePickupCollisions(player);
 
     if (player.health <= 0) {
         m_flowState = FlowState::Lose;
