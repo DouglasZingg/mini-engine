@@ -6,6 +6,69 @@
 
 class SdlPlatform;
 
+enum class TileType : int {
+    Floor = 0,
+    Wall = 1,
+    TokenPickup = 2,
+    EnemyChaserSpawn = 3,
+    PlayerSpawn = 4,
+    HealthPickup = 5,
+    SpeedPickup = 6,
+    ShieldPickup = 7,
+    EnemyFastSpawn = 8,
+    EnemyTankSpawn = 9,
+    RevealDoor = 10,
+    TrapArmed = 11,
+    TrapSpent = 12,
+};
+
+constexpr int TileValue(TileType tile) { return static_cast<int>(tile); }
+
+inline bool IsFloorLikeTile(TileType tile) {
+    switch (tile) {
+    case TileType::Floor:
+    case TileType::TokenPickup:
+    case TileType::EnemyChaserSpawn:
+    case TileType::PlayerSpawn:
+    case TileType::HealthPickup:
+    case TileType::SpeedPickup:
+    case TileType::ShieldPickup:
+    case TileType::EnemyFastSpawn:
+    case TileType::EnemyTankSpawn:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool IsSpawnMarkerTile(TileType tile) {
+    switch (tile) {
+    case TileType::EnemyChaserSpawn:
+    case TileType::PlayerSpawn:
+    case TileType::EnemyFastSpawn:
+    case TileType::EnemyTankSpawn:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool IsPickupMarkerTile(TileType tile) {
+    switch (tile) {
+    case TileType::TokenPickup:
+    case TileType::HealthPickup:
+    case TileType::SpeedPickup:
+    case TileType::ShieldPickup:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool IsSolidTileType(TileType tile) {
+    return tile == TileType::Wall;
+}
+
 class Tilemap {
 public:
     bool LoadCSV(const char* path);

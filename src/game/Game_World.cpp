@@ -10,7 +10,7 @@
 namespace {
 
 bool IsWalkableProcTile(int v) {
-    return v != 1;
+    return v != TileValue(TileType::Wall);
 }
 
 int CountReachableFloorTiles(const std::vector<int>& tiles, int w, int h, int sx, int sy) {
@@ -113,8 +113,8 @@ void Game::UpdateWorldSizeFromMap()
 }
 
 // Quick sanity checks so broken CSVs don't soft-lock you.
-// - Ensures tile values are in the known range (0..9)
-// - Ensures exactly one player tile (4). Extra spawns are cleared to floor.
+// - Ensures tile values are in the known range (Floor..TrapSpent)
+// - Ensures exactly one player spawn tile. Extra spawns are cleared to floor.
 // - If no player tile exists, we keep config spawn fallback and warn.
 
 void Game::ValidateAndSanitizeMap()
@@ -134,33 +134,32 @@ void Game::ValidateAndSanitizeMap()
         for (int x = 0; x < m_map.Width(); ++x) {
             const int v = m_map.At(x, y);
 
-            if (v == 4) playerCount++;
+            if (v == TileValue(TileType::PlayerSpawn)) playerCount++;
 
-            // Known tiles: 0..9 (based on your legend).
-            if (v < 0 || v > 9) {
+            if (v < TileValue(TileType::Floor) || v > TileValue(TileType::TrapSpent)) {
                 hadBadTiles = true;
                 badTileCount++;
-                m_map.SetAt(x, y, 0);
+                m_map.SetAt(x, y, TileValue(TileType::Floor));
             }
         }
     }
 
     if (playerCount == 0) {
-        m_levelValidationMsg = "No player spawn (4) in this map. Using config fallback spawn.";
+        m_levelValidationMsg = "No player spawn (PlayerSpawn tile) in this map. Using config fallback spawn.";
     }
     else if (playerCount > 1) {
         // Keep the first, clear the rest so restarts behave predictably.
         bool keptOne = false;
         for (int y = 0; y < m_map.Height(); ++y) {
             for (int x = 0; x < m_map.Width(); ++x) {
-                if (m_map.At(x, y) == 4) {
+                if (m_map.At(x, y) == TileValue(TileType::PlayerSpawn)) {
                     if (!keptOne) keptOne = true;
-                    else m_map.SetAt(x, y, 0);
+                    else m_map.SetAt(x, y, TileValue(TileType::Floor));
                 }
             }
         }
 
-        m_levelValidationMsg = "Multiple player spawns (4) found. Keeping the first, clearing the rest.";
+        m_levelValidationMsg = "Multiple player spawn tiles found. Keeping the first, clearing the rest.";
     }
 
     if (hadBadTiles) {
@@ -175,7 +174,7 @@ void Game::ValidateAndSanitizeMap()
 bool Game::GenerateProceduralLevel(int levelIndex) {
 	const int width = 44;
 	const int height = 28;
-	std::vector<int> tiles((size_t)width * (size_t)height, 1);
+	std::vector<int> tiles((size_t)width * (size_t)height, TileValue(TileType::Wall));
 	auto idx = [width](int x, int y) { return y * width + x; };
 
 	const uint32_t seed = 0xD06E1001u + (uint32_t)levelIndex * 977u;
@@ -183,7 +182,7 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 
 	auto carveFloor = [&](int x, int y) {
 		if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
-		tiles[idx(x, y)] = 0;
+		tiles[idx(x, y)] = TileValue(TileType::Floor);
 		};
 
 	struct ProcRoom {
@@ -358,7 +357,7 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 	// Player start
 	const int playerX = roomCenterX(startRoom);
 	const int playerY = roomCenterY(startRoom);
-	tiles[idx(playerX, playerY)] = 4;
+	tiles[idx(playerX, playerY)] = TileValue(TileType::PlayerSpawn);
 
 	auto classifyRoom = [&](size_t roomIndex) {
 		if (roomIndex == 0) return 0; // start
@@ -406,24 +405,24 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		if (roomType == 2 || roomType == 3) {
 			const int tokensHere = (roomType == 2) ? 1 : 1 + ((int)ri & 1);
 			for (int i = 0; i < useCount(basicPickups, tokensHere); ++i) {
-				placeTileInRoom(room, 2, used, 4);
+				placeTileInRoom(room, TileValue(TileType::TokenPickup), used, 4);
 			}
 
 			if (healthCount > 0) {
 				for (int i = 0; i < useCount(healthCount, 1); ++i) {
-					placeTileInRoom(room, 5, used, 6);
+					placeTileInRoom(room, TileValue(TileType::HealthPickup), used, 6);
 				}
 			}
 
 			if (speedCount > 0) {
 				for (int i = 0; i < useCount(speedCount, 1); ++i) {
-					placeTileInRoom(room, 6, used, 6);
+					placeTileInRoom(room, TileValue(TileType::SpeedPickup), used, 6);
 				}
 			}
 
 			if (shieldCount > 0 && roomType == 2) {
 				for (int i = 0; i < useCount(shieldCount, 1); ++i) {
-					placeTileInRoom(room, 7, used, 8);
+					placeTileInRoom(room, TileValue(TileType::ShieldPickup), used, 8);
 				}
 			}
 		}
@@ -432,18 +431,18 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 			const int baseEnemiesHere = (roomType == 4) ? 2 : 1;
 
 			for (int i = 0; i < useCount(basicEnemies, baseEnemiesHere); ++i) {
-				placeTileInRoom(room, 3, used, 8);
+				placeTileInRoom(room, TileValue(TileType::EnemyChaserSpawn), used, 8);
 			}
 
 			if (fastCount > 0) {
 				for (int i = 0; i < useCount(fastCount, 1); ++i) {
-					placeTileInRoom(room, 8, used, 10);
+					placeTileInRoom(room, TileValue(TileType::EnemyFastSpawn), used, 10);
 				}
 			}
 
 			if (tankCount > 0 && room.w >= 7 && room.h >= 6) {
 				for (int i = 0; i < useCount(tankCount, 1); ++i) {
-					placeTileInRoom(room, 9, used, 10);
+					placeTileInRoom(room, TileValue(TileType::EnemyTankSpawn), used, 10);
 				}
 			}
 		}
@@ -457,20 +456,20 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		std::vector<std::pair<int, int>> used;
 		const ProcRoom& room = rooms[ri];
 
-		if (basicPickups > 0) for (int i = 0; i < useCount(basicPickups, 1); ++i) placeTileInRoom(room, 2, used, 4);
-		if (basicEnemies > 0) for (int i = 0; i < useCount(basicEnemies, 1); ++i) placeTileInRoom(room, 3, used, 8);
-		if (healthCount > 0)  for (int i = 0; i < useCount(healthCount, 1); ++i)  placeTileInRoom(room, 5, used, 6);
-		if (speedCount > 0)   for (int i = 0; i < useCount(speedCount, 1); ++i)   placeTileInRoom(room, 6, used, 6);
-		if (shieldCount > 0)  for (int i = 0; i < useCount(shieldCount, 1); ++i)  placeTileInRoom(room, 7, used, 8);
-		if (fastCount > 0)    for (int i = 0; i < useCount(fastCount, 1); ++i)    placeTileInRoom(room, 8, used, 10);
-		if (tankCount > 0)    for (int i = 0; i < useCount(tankCount, 1); ++i)    placeTileInRoom(room, 9, used, 10);
+		if (basicPickups > 0) for (int i = 0; i < useCount(basicPickups, 1); ++i) placeTileInRoom(room, TileValue(TileType::TokenPickup), used, 4);
+		if (basicEnemies > 0) for (int i = 0; i < useCount(basicEnemies, 1); ++i) placeTileInRoom(room, TileValue(TileType::EnemyChaserSpawn), used, 8);
+		if (healthCount > 0)  for (int i = 0; i < useCount(healthCount, 1); ++i)  placeTileInRoom(room, TileValue(TileType::HealthPickup), used, 6);
+		if (speedCount > 0)   for (int i = 0; i < useCount(speedCount, 1); ++i)   placeTileInRoom(room, TileValue(TileType::SpeedPickup), used, 6);
+		if (shieldCount > 0)  for (int i = 0; i < useCount(shieldCount, 1); ++i)  placeTileInRoom(room, TileValue(TileType::ShieldPickup), used, 8);
+		if (fastCount > 0)    for (int i = 0; i < useCount(fastCount, 1); ++i)    placeTileInRoom(room, TileValue(TileType::EnemyFastSpawn), used, 10);
+		if (tankCount > 0)    for (int i = 0; i < useCount(tankCount, 1); ++i)    placeTileInRoom(room, TileValue(TileType::EnemyTankSpawn), used, 10);
 	}
 
 	const int reachable = CountReachableFloorTiles(tiles, width, height, playerX, playerY);
 	if (reachable < 140) {
 		m_levelValidationMsg = "Generated dungeon was too cramped. Using fallback floor.";
 
-		std::fill(tiles.begin(), tiles.end(), 1);
+		std::fill(tiles.begin(), tiles.end(), TileValue(TileType::Wall));
 
 		ProcRoom a{ 4, 5, 8, 6 };
 		ProcRoom b{ width / 2 - 4, height / 2 - 3, 9, 7 };
@@ -483,12 +482,12 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
 		carveCorridor(roomCenterX(a), roomCenterY(a), roomCenterX(b), roomCenterY(b));
 		carveCorridor(roomCenterX(b), roomCenterY(b), roomCenterX(c), roomCenterY(c));
 
-		tiles[idx(roomCenterX(b), roomCenterY(b))] = 4;
-		tiles[idx(roomCenterX(a), roomCenterY(a))] = 2;
-		tiles[idx(roomCenterX(c), roomCenterY(c))] = 3;
+		tiles[idx(roomCenterX(b), roomCenterY(b))] = TileValue(TileType::PlayerSpawn);
+		tiles[idx(roomCenterX(a), roomCenterY(a))] = TileValue(TileType::TokenPickup);
+		tiles[idx(roomCenterX(c), roomCenterY(c))] = TileValue(TileType::EnemyChaserSpawn);
 
-		if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = 5;
-		if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = 8;
+		if (levelIndex >= 4) tiles[idx(roomCenterX(c), roomCenterY(c) - 1)] = TileValue(TileType::HealthPickup);
+		if (levelIndex >= 7) tiles[idx(roomCenterX(c) + 1, roomCenterY(c))] = TileValue(TileType::EnemyFastSpawn);
 	}
 	else {
 		m_levelValidationMsg = "Dungeon floor generated from seed " + std::to_string(seed) + ".";
@@ -529,14 +528,14 @@ void Game::RestartGame() {
 	m_playerIndex = 0;
 	m_nextEntityId = 1;
 
-	constexpr int kTilePlayer = 4;
+	constexpr TileType kTilePlayer = TileType::PlayerSpawn;
 
 	// 1) Find player spawn from map (tile 4). Fallback to config if none.
 	Vec2 playerSpawn = m_cfg.playerSpawn;
 	bool foundPlayer = false;
 	for (int ty = 0; ty < m_map.Height() && !foundPlayer; ++ty) {
 		for (int tx = 0; tx < m_map.Width(); ++tx) {
-			if (m_map.At(tx, ty) == kTilePlayer) {
+			if (static_cast<TileType>(m_map.At(tx, ty)) == kTilePlayer) {
 				playerSpawn = m_map.TileToWorldCenter(tx, ty);
 				foundPlayer = true;
 				break;
@@ -558,16 +557,16 @@ void Game::RestartGame() {
 	//    5 = Health (+1 heart)
 	//    6 = Speed (temporary speed boost)
 	//    7 = Shield (one-hit protection)
-	constexpr int kTileToken  = 2;
-	constexpr int kTileHealth = 5;
-	constexpr int kTileSpeed  = 6;
-	constexpr int kTileShield = 7;
+	constexpr TileType kTileToken  = TileType::TokenPickup;
+	constexpr TileType kTileHealth = TileType::HealthPickup;
+	constexpr TileType kTileSpeed  = TileType::SpeedPickup;
+	constexpr TileType kTileShield = TileType::ShieldPickup;
 
 	m_pickupsRemaining = 0;
 	m_tokensCollected = 0;
 	for (int ty = 0; ty < m_map.Height(); ++ty) {
 		for (int tx = 0; tx < m_map.Width(); ++tx) {
-			const int tile = m_map.At(tx, ty);
+			const TileType tile = static_cast<TileType>(m_map.At(tx, ty));
 			if (tile == kTileToken || tile == kTileHealth || tile == kTileSpeed || tile == kTileShield) {
 				Vec2 center = m_map.TileToWorldCenter(tx, ty);
 				if (tile == kTileToken) {
@@ -585,7 +584,7 @@ void Game::RestartGame() {
 				}
 			}
 
-			if (tile == 3 || tile == 8 || tile == 9) {
+			if (tile == TileType::EnemyChaserSpawn || tile == TileType::EnemyFastSpawn || tile == TileType::EnemyTankSpawn) {
 				Vec2 center = m_map.TileToWorldCenter(tx, ty);
 
 				Entity& enemy = CreateEntity(EntityType::Enemy, center, 14.0f);
@@ -593,12 +592,12 @@ void Game::RestartGame() {
 				enemy.enemyKind = EnemyKind::Chaser;
 				enemy.moveSpeed = 0.0f; // uses m_enemySpeed
 
-				if (tile == 8) { // Fast
+				if (tile == TileType::EnemyFastSpawn) { // Fast
 					enemy.enemyKind = EnemyKind::Fast;
 					enemy.radius = 12.0f;
 					enemy.moveSpeed = m_enemySpeed * 1.6f;
 				}
-				else if (tile == 9) { // Tank
+				else if (tile == TileType::EnemyTankSpawn) { // Tank
 					enemy.enemyKind = EnemyKind::Tank;
 					enemy.radius = 20.0f;
 					enemy.moveSpeed = m_enemySpeed * 0.65f;
