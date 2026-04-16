@@ -141,13 +141,27 @@ private:
     float m_enemyKnockbackStrength = 450.0f;
     float m_enemyHitstunSeconds = 0.08f;
 
+    enum class RoomState { Hidden, Revealed, Cleared, Locked };
+
     struct DungeonRoom
     {
-        int x;
-        int y;
-        int w;
-        int h;
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
+        RoomState state = RoomState::Hidden;
+        bool isStartRoom = false;
+        bool hasCombatEncounter = false;
+        bool hasPickupReward = false;
+        int assignedEnemyCount = 0;
+        int assignedPickupCount = 0;
     };
 
+    int FindRoomIndexForTile(int tx, int ty) const;
+    int FindRoomIndexAtWorld(const Vec2& worldPos) const;
+    void RefreshRoomAssignments();
+    void UpdateRoomStateForPlayer(const Vec2& playerPos);
+
     std::vector<DungeonRoom> m_generatedRooms;
+    int m_currentRoomIndex = -1;
 };

@@ -1,6 +1,7 @@
 #include "game/Game.h"
 #include "platform/SdlPlatform.h"
 #include "game/Pathfinding.h"
+#include "engine/Paths.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -413,6 +414,7 @@ if (stunPressed && m_stunCooldownTimer <= 0.0f) {
 	// keep existing
 	ClampPlayerToWorld(player);
 	m_map.ResolveCircleCollision(player.pos, player.radius);
+    UpdateRoomStateForPlayer(player.pos);
 
 	
 // --------------------
@@ -671,6 +673,8 @@ for (size_t i = 0; i < m_entities.size(); ++i) {
 			break;
 		}
 	}
+
+    UpdateRoomStateForPlayer(player.pos);
 
 if (player.health <= 0) {
 		m_flowState = FlowState::Lose;

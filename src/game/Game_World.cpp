@@ -46,6 +46,12 @@ int CountReachableFloorTiles(const std::vector<int>& tiles, int w, int h, int sx
 
 } // namespace
 
+
+bool TileInsideRoomInterior(int roomX, int roomY, int roomW, int roomH, int tx, int ty) {
+    return tx >= roomX + 1 && tx < roomX + roomW - 1 && ty >= roomY + 1 && ty < roomY + roomH - 1;
+}
+
+
 bool Game::ReloadConfig(const char* path) {
 	GameConfig newCfg = m_cfg;
 	if (!LoadGameConfig(path, newCfg)) {
@@ -504,6 +510,17 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
         }
     }
 
+    for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
+        DungeonRoom& room = m_generatedRooms[i];
+        room.isStartRoom = (i == 0);
+        room.state = room.isStartRoom ? RoomState::Cleared : RoomState::Hidden;
+        room.hasCombatEncounter = false;
+        room.hasPickupReward = false;
+        room.assignedEnemyCount = 0;
+        room.assignedPickupCount = 0;
+    }
+    m_currentRoomIndex = 0;
+
 	return m_map.LoadFromData(width, height, tiles);
 }
 
@@ -607,8 +624,104 @@ void Game::RestartGame() {
 	}
 
 	m_tokensTotal = m_pickupsRemaining;
+    RefreshRoomAssignments();
+    UpdateRoomStateForPlayer(player.pos);
 }
 
+
+
+int Game::FindRoomIndexForTile(int tx, int ty) const
+{
+    for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
+        if (TileInsideRoomInterior(m_generatedRooms[i].x, m_generatedRooms[i].y, m_generatedRooms[i].w, m_generatedRooms[i].h, tx, ty)) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+int Game::FindRoomIndexAtWorld(const Vec2& worldPos) const
+{
+    const TileCoord tc = m_map.WorldToTile(worldPos);
+    return FindRoomIndexForTile(tc.x, tc.y);
+}
+
+void Game::RefreshRoomAssignments()
+{
+    for (DungeonRoom& room : m_generatedRooms) {
+        room.assignedEnemyCount = 0;
+        room.assignedPickupCount = 0;
+        room.hasCombatEncounter = false;
+        room.hasPickupReward = false;
+        if (!room.isStartRoom && room.state != RoomState::Locked) {
+            room.state = RoomState::Hidden;
+        }
+    }
+
+    for (Entity& e : m_entities) {
+        if (!e.active) continue;
+        const int roomIndex = FindRoomIndexAtWorld(e.pos);
+        e.homeRoomIndex = roomIndex;
+        if (roomIndex < 0 || roomIndex >= (int)m_generatedRooms.size()) {
+            continue;
+        }
+
+        DungeonRoom& room = m_generatedRooms[roomIndex];
+        if (e.type == EntityType::Enemy) {
+            room.assignedEnemyCount += 1;
+            room.hasCombatEncounter = true;
+            e.active = room.isStartRoom || room.state == RoomState::Revealed || room.state == RoomState::Cleared;
+        } else if (e.type == EntityType::Pickup) {
+            room.assignedPickupCount += 1;
+            room.hasPickupReward = true;
+            e.active = room.isStartRoom || room.state == RoomState::Revealed || room.state == RoomState::Cleared;
+        }
+    }
+}
+
+void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
+{
+    m_currentRoomIndex = FindRoomIndexAtWorld(playerPos);
+    if (m_currentRoomIndex < 0 || m_currentRoomIndex >= (int)m_generatedRooms.size()) {
+        return;
+    }
+
+    DungeonRoom& room = m_generatedRooms[m_currentRoomIndex];
+    if (room.state == RoomState::Locked) {
+        return;
+    }
+
+    if (room.state == RoomState::Hidden) {
+        room.state = RoomState::Revealed;
+        m_toastText = room.hasCombatEncounter ? "ROOM REVEALED" : "ROOM DISCOVERED";
+        m_toastTimer = m_toastDuration;
+
+        for (Entity& e : m_entities) {
+            if (e.homeRoomIndex == m_currentRoomIndex &&
+                (e.type == EntityType::Enemy || e.type == EntityType::Pickup)) {
+                e.active = true;
+            }
+        }
+    }
+
+    int activeEnemies = 0;
+    int activePickups = 0;
+    for (const Entity& e : m_entities) {
+        if (!e.active) continue;
+        if (e.homeRoomIndex != m_currentRoomIndex) continue;
+        if (e.type == EntityType::Enemy) ++activeEnemies;
+        else if (e.type == EntityType::Pickup) ++activePickups;
+    }
+
+    room.assignedEnemyCount = activeEnemies;
+    room.assignedPickupCount = activePickups;
+
+    if (activeEnemies == 0 && activePickups == 0) {
+        room.state = RoomState::Cleared;
+    } else if (room.state != RoomState::Revealed) {
+        room.state = RoomState::Revealed;
+    }
+}
 
 
 

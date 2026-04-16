@@ -207,6 +207,26 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 	// World (tilemap first, then entities)
 	m_map.Render(platform, m_camera);
 
+    if (dbg.showUI && !m_generatedRooms.empty()) {
+        for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
+            const DungeonRoom& room = m_generatedRooms[i];
+            int rr = 100, gg = 100, bb = 100;
+            switch (room.state) {
+            case RoomState::Hidden:   rr = 70;  gg = 70;  bb = 70;  break;
+            case RoomState::Revealed: rr = 210; gg = 170; bb = 70;  break;
+            case RoomState::Cleared:  rr = 80;  gg = 190; bb = 100; break;
+            case RoomState::Locked:   rr = 170; gg = 70;  bb = 70;  break;
+            }
+            const Vec2 tl = m_camera.WorldToScreen(Vec2{ room.x * (float)m_map.TileSize(), room.y * (float)m_map.TileSize() });
+            const int rw = room.w * m_map.TileSize();
+            const int rh = room.h * m_map.TileSize();
+            platform.DrawLine((int)tl.x, (int)tl.y, (int)tl.x + rw, (int)tl.y);
+            platform.DrawLine((int)tl.x, (int)tl.y, (int)tl.x, (int)tl.y + rh);
+            platform.DrawLine((int)tl.x + rw, (int)tl.y, (int)tl.x + rw, (int)tl.y + rh);
+            platform.DrawLine((int)tl.x, (int)tl.y + rh, (int)tl.x + rw, (int)tl.y + rh);
+        }
+    }
+
 	for (const Entity& e : m_entities) {
 		if (!e.active) continue;
 		const Vec2 worldPos = e.prevPos + (e.pos - e.prevPos) * alpha;
