@@ -679,9 +679,31 @@ void Game::RefreshRoomAssignments()
     }
 }
 
-void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
+void Game::RevealRoom(int roomIndex)
 {
-    m_currentRoomIndex = FindRoomIndexAtWorld(playerPos);
+    if (roomIndex < 0 || roomIndex >= (int)m_generatedRooms.size()) {
+        return;
+    }
+
+    DungeonRoom& room = m_generatedRooms[roomIndex];
+    if (room.state == RoomState::Locked || room.state == RoomState::Revealed || room.state == RoomState::Cleared) {
+        return;
+    }
+
+    room.state = RoomState::Revealed;
+    m_toastText = room.hasCombatEncounter ? "ROOM REVEALED" : "ROOM DISCOVERED";
+    m_toastTimer = m_toastDuration;
+
+    for (Entity& e : m_entities) {
+        if (e.homeRoomIndex == roomIndex &&
+            (e.type == EntityType::Enemy || e.type == EntityType::Pickup)) {
+            e.active = true;
+        }
+    }
+}
+
+void Game::RefreshCurrentRoomState()
+{
     if (m_currentRoomIndex < 0 || m_currentRoomIndex >= (int)m_generatedRooms.size()) {
         return;
     }
@@ -689,19 +711,6 @@ void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
     DungeonRoom& room = m_generatedRooms[m_currentRoomIndex];
     if (room.state == RoomState::Locked) {
         return;
-    }
-
-    if (room.state == RoomState::Hidden) {
-        room.state = RoomState::Revealed;
-        m_toastText = room.hasCombatEncounter ? "ROOM REVEALED" : "ROOM DISCOVERED";
-        m_toastTimer = m_toastDuration;
-
-        for (Entity& e : m_entities) {
-            if (e.homeRoomIndex == m_currentRoomIndex &&
-                (e.type == EntityType::Enemy || e.type == EntityType::Pickup)) {
-                e.active = true;
-            }
-        }
     }
 
     int activeEnemies = 0;
@@ -718,9 +727,28 @@ void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
 
     if (activeEnemies == 0 && activePickups == 0) {
         room.state = RoomState::Cleared;
-    } else if (room.state != RoomState::Revealed) {
+    } else {
         room.state = RoomState::Revealed;
     }
+}
+
+void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
+{
+    m_currentRoomIndex = FindRoomIndexAtWorld(playerPos);
+    if (m_currentRoomIndex < 0 || m_currentRoomIndex >= (int)m_generatedRooms.size()) {
+        return;
+    }
+
+    const DungeonRoom& room = m_generatedRooms[m_currentRoomIndex];
+    if (room.state == RoomState::Locked) {
+        return;
+    }
+
+    if (room.state == RoomState::Hidden) {
+        RevealRoom(m_currentRoomIndex);
+    }
+
+    RefreshCurrentRoomState();
 }
 
 

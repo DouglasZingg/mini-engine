@@ -161,6 +161,11 @@ private:
     int FindRoomIndexAtWorld(const Vec2& worldPos) const;
     void RefreshRoomAssignments();
     void UpdateRoomStateForPlayer(const Vec2& playerPos);
+    void RevealRoom(int roomIndex);
+    void RefreshCurrentRoomState();
+    void HandlePlayerTileInteractions(Entity& player);
+    void HandlePlayerPickupInteractions(Entity& player);
+    void HandlePlayerRoomAndWorldInteractions(Entity& player);
 
     std::vector<DungeonRoom> m_generatedRooms;
     int m_currentRoomIndex = -1;

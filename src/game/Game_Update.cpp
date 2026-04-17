@@ -414,7 +414,7 @@ if (stunPressed && m_stunCooldownTimer <= 0.0f) {
 	// keep existing
 	ClampPlayerToWorld(player);
 	m_map.ResolveCircleCollision(player.pos, player.radius);
-    UpdateRoomStateForPlayer(player.pos);
+    HandlePlayerRoomAndWorldInteractions(player);
 
 	
 // --------------------
@@ -625,56 +625,10 @@ for (size_t i = 0; i < m_entities.size(); ++i) {
 	}
 
 	// --------------------
+	// INTERACTIONS (player vs pickups / gameplay tiles / room state)
 	// --------------------
-	// PICKUPS (player vs pickups)
-	// --------------------
-	for (Entity& e : m_entities) {
-		if (!e.active) continue;
-		if (e.type != EntityType::Pickup) continue;
-
-		if (!CheckCollision(player, e)) continue;
-
-		e.active = false;
-
-		switch (e.pickupKind) {
-		case PickupKind::Token:
-			m_tokensCollected += 1;
-			m_toastText = "+TOKEN";
-			m_toastTimer = m_toastDuration;
-			if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
-			m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
-			if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
-				m_flowState = FlowState::Win;
-			}
-			break;
-		case PickupKind::Health:
-			// +1 heart (clamped)
-			if (player.health < m_playerMaxHealth) {
-				player.health += 1;
-				m_toastText = "+HEALTH";
-			} else {
-				m_toastText = "HEALTH FULL";
-			}
-			m_toastTimer = m_toastDuration;
-			break;
-		case PickupKind::Speed:
-			// Temporary movement boost
-			m_speedBuffTimer = m_speedBuffDuration;
-			m_toastText = "+SPEED";
-			m_toastTimer = m_toastDuration;
-			break;
-		case PickupKind::Shield:
-			// One-hit protection (timer also useful for UI)
-			m_shieldTimer = m_shieldDuration;
-			m_toastText = "+SHIELD";
-			m_toastTimer = m_toastDuration;
-			break;
-		default:
-			break;
-		}
-	}
-
-    UpdateRoomStateForPlayer(player.pos);
+	HandlePlayerPickupInteractions(player);
+    HandlePlayerRoomAndWorldInteractions(player);
 
 if (player.health <= 0) {
 		m_flowState = FlowState::Lose;
@@ -732,4 +686,92 @@ if (player.health <= 0) {
 	}
 }
 
+void Game::HandlePlayerTileInteractions(Entity& player)
+{
+    const TileCoord tc = m_map.WorldToTile(player.pos);
+    const TileType tile = static_cast<TileType>(m_map.At(tc.x, tc.y));
+
+    switch (tile) {
+    case TileType::RevealDoor: {
+        const int roomIndex = FindRoomIndexForTile(tc.x, tc.y);
+        if (roomIndex >= 0) {
+            RevealRoom(roomIndex);
+        }
+        m_map.SetAt(tc.x, tc.y, TileValue(TileType::Floor));
+        break;
+    }
+    case TileType::TrapArmed:
+        if (m_shieldTimer > 0.0f) {
+            m_shieldTimer = 0.0f;
+            m_toastText = "SHIELD BLOCKED";
+            m_toastTimer = m_toastDuration;
+        } else if (player.invulnTimer <= 0.0f) {
+            player.health -= 1;
+            player.invulnTimer = m_iframesSeconds;
+            player.hitstun = m_hitstunSeconds;
+            m_damageFlashTimer = m_damageFlashDuration;
+            m_toastText = "TRAP!";
+            m_toastTimer = m_toastDuration;
+            m_shakeDuration = 0.14f;
+            m_shakeTime = m_shakeDuration;
+            if (m_shakeStrength < 6.0f) {
+                m_shakeStrength = 6.0f;
+            }
+        }
+        m_map.SetAt(tc.x, tc.y, TileValue(TileType::TrapSpent));
+        break;
+    default:
+        break;
+    }
+}
+
+void Game::HandlePlayerPickupInteractions(Entity& player)
+{
+    for (Entity& e : m_entities) {
+        if (!e.active || e.type != EntityType::Pickup) continue;
+        if (!CheckCollision(player, e)) continue;
+
+        e.active = false;
+
+        switch (e.pickupKind) {
+        case PickupKind::Token:
+            m_tokensCollected += 1;
+            m_toastText = "+TOKEN";
+            m_toastTimer = m_toastDuration;
+            if (m_tokensCollected > m_tokensTotal) m_tokensCollected = m_tokensTotal;
+            m_pickupsRemaining = std::max(0, m_tokensTotal - m_tokensCollected);
+            if (m_tokensCollected >= m_tokensTotal && m_tokensTotal > 0) {
+                m_flowState = FlowState::Win;
+            }
+            break;
+        case PickupKind::Health:
+            if (player.health < m_playerMaxHealth) {
+                player.health += 1;
+                m_toastText = "+HEALTH";
+            } else {
+                m_toastText = "HEALTH FULL";
+            }
+            m_toastTimer = m_toastDuration;
+            break;
+        case PickupKind::Speed:
+            m_speedBuffTimer = m_speedBuffDuration;
+            m_toastText = "+SPEED";
+            m_toastTimer = m_toastDuration;
+            break;
+        case PickupKind::Shield:
+            m_shieldTimer = m_shieldDuration;
+            m_toastText = "+SHIELD";
+            m_toastTimer = m_toastDuration;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+void Game::HandlePlayerRoomAndWorldInteractions(Entity& player)
+{
+    HandlePlayerTileInteractions(player);
+    UpdateRoomStateForPlayer(player.pos);
+}
 
