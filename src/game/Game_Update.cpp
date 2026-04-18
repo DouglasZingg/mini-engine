@@ -396,12 +396,15 @@ if (stunPressed && m_stunCooldownTimer <= 0.0f) {
 		Vec2 d = e.pos - player.pos;
 		float distSq = d.x * d.x + d.y * d.y;
 		if (distSq <= m_stunRadius * m_stunRadius) {
-			float stunScale = (e.enemyKind == EnemyKind::Tank) ? 0.65f : 1.0f;
+			const float stunScale = (e.enemyKind == EnemyKind::Tank) ? 0.65f : 1.0f;
 			e.stunTimer = std::max(e.stunTimer, m_stunDuration * stunScale);
 			e.path.waypoints.clear();
 			e.path.index = 0;
 			e.path.repathTimer = 0.0f;
 			e.vel = { 0.0f, 0.0f };
+			if (DamageEnemy(e, 1, player.pos)) {
+				continue;
+			}
 		}
 	}
 }
@@ -423,7 +426,7 @@ if (stunPressed && m_stunCooldownTimer <= 0.0f) {
 
 for (size_t i = 0; i < m_entities.size(); ++i) {
 	Entity& e = m_entities[i];
-	if (e.type != EntityType::Enemy) continue;
+	if (!e.active || e.type != EntityType::Enemy) continue;
 
 	e.prevPos = e.pos;
 	if (e.stunTimer > 0.0f) {
@@ -561,10 +564,10 @@ for (size_t i = 0; i < m_entities.size(); ++i) {
 // SEPARATION SYSTEM (enemy vs enemy)
 	// --------------------
 	for (size_t i = 0; i < m_entities.size(); ++i) {
-		if (m_entities[i].type != EntityType::Enemy) continue;
+		if (!m_entities[i].active || m_entities[i].type != EntityType::Enemy) continue;
 
 		for (size_t j = i + 1; j < m_entities.size(); ++j) {
-			if (m_entities[j].type != EntityType::Enemy) continue;
+			if (!m_entities[j].active || m_entities[j].type != EntityType::Enemy) continue;
 
 			SeparateEntities(m_entities[i], m_entities[j]);
 		}
@@ -577,7 +580,7 @@ for (size_t i = 0; i < m_entities.size(); ++i) {
 		if ((int)i == m_playerIndex) continue;
 
 		Entity& e = m_entities[i];
-		if (e.type != EntityType::Enemy) continue;
+		if (!e.active || e.type != EntityType::Enemy) continue;
 		if (e.stunTimer > 0.0f) continue;
 
 		if (CheckCollision(player, e)) {
@@ -663,14 +666,20 @@ if (player.health <= 0) {
 	// --------------------
 	// DEBUG OUTPUT (for UI)
 	// --------------------
-	dbg.entityCount = (int)m_entities.size();
-	dbg.enemyCount = std::max(0, dbg.entityCount - 1);
+	dbg.entityCount = 0;
+	dbg.enemyCount = 0;
 	dbg.playerPos = player.pos;
 	dbg.cameraPos = m_camera.Position();
 	dbg.playerHealth = player.health;
 	dbg.gameOver = m_gameOver;
 	dbg.debugEntityCount = 0;
 	for (const Entity& e : m_entities) {
+		if (!e.active) continue;
+		++dbg.entityCount;
+		if (e.type == EntityType::Enemy) ++dbg.enemyCount;
+	}
+	for (const Entity& e : m_entities) {
+		if (!e.active) continue;
 		if (dbg.debugEntityCount >= DebugState::kMaxDebugEntities) break;
 		auto& row = dbg.debugEntities[dbg.debugEntityCount++];
 
@@ -684,6 +693,42 @@ if (player.health <= 0) {
 		row.radius = e.radius;
 		row.ai = (e.type == EntityType::Enemy && e.ai == AIState::Seek) ? 1 : 0;
 	}
+}
+
+
+
+bool Game::DamageEnemy(Entity& enemy, int damage, const Vec2& damageSourcePos)
+{
+    if (!enemy.active || enemy.type != EntityType::Enemy || damage <= 0) {
+        return false;
+    }
+
+    enemy.health -= damage;
+    enemy.hitstun = std::max(enemy.hitstun, m_enemyHitstunSeconds);
+
+    Vec2 d = enemy.pos - damageSourcePos;
+    float distSq = d.x * d.x + d.y * d.y;
+    if (distSq < 0.0001f) {
+        d = Vec2{1.0f, 0.0f};
+        distSq = 1.0f;
+    }
+    const float invLen = 1.0f / std::sqrt(distSq);
+    const Vec2 n{ d.x * invLen, d.y * invLen };
+    enemy.vel = enemy.vel + n * m_enemyKnockbackStrength;
+
+    if (enemy.health <= 0) {
+        enemy.active = false;
+        enemy.vel = {0.0f, 0.0f};
+        enemy.path.waypoints.clear();
+        enemy.path.index = 0;
+        m_score += 100;
+        m_toastText = "ENEMY DOWN";
+        m_toastTimer = m_toastDuration;
+        RefreshCurrentRoomState();
+        return true;
+    }
+
+    return false;
 }
 
 void Game::HandlePlayerTileInteractions(Entity& player)

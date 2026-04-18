@@ -163,6 +163,7 @@ private:
     void UpdateRoomStateForPlayer(const Vec2& playerPos);
     void RevealRoom(int roomIndex);
     void RefreshCurrentRoomState();
+    bool DamageEnemy(Entity& enemy, int damage, const Vec2& damageSourcePos);
     void HandlePlayerTileInteractions(Entity& player);
     void HandlePlayerPickupInteractions(Entity& player);
     void HandlePlayerRoomAndWorldInteractions(Entity& player);

@@ -608,16 +608,19 @@ void Game::RestartGame() {
 				enemy.homePos = center;
 				enemy.enemyKind = EnemyKind::Chaser;
 				enemy.moveSpeed = 0.0f; // uses m_enemySpeed
+				enemy.health = 2;
 
 				if (tile == TileType::EnemyFastSpawn) { // Fast
 					enemy.enemyKind = EnemyKind::Fast;
 					enemy.radius = 12.0f;
 					enemy.moveSpeed = m_enemySpeed * 1.6f;
+					enemy.health = 1;
 				}
 				else if (tile == TileType::EnemyTankSpawn) { // Tank
 					enemy.enemyKind = EnemyKind::Tank;
 					enemy.radius = 20.0f;
 					enemy.moveSpeed = m_enemySpeed * 0.65f;
+					enemy.health = 3;
 				}
 			}
 		}
@@ -766,12 +769,16 @@ void Game::SpawnDebugEnemyNearPlayer(EnemyKind kind)
     enemy.moveSpeed = 0.0f;
     enemy.aggroRadius = 350.0f;
 
+    enemy.health = 2;
+
     if (kind == EnemyKind::Fast) {
         enemy.radius = 12.0f;
         enemy.moveSpeed = m_enemySpeed * 1.6f;
+        enemy.health = 1;
     } else if (kind == EnemyKind::Tank) {
         enemy.radius = 20.0f;
         enemy.moveSpeed = m_enemySpeed * 0.65f;
+        enemy.health = 3;
     }
 }
 
