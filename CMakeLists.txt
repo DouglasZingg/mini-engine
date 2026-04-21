@@ -14,6 +14,10 @@ add_executable(mini_engine
     src/engine/Config.cpp
     src/engine/Input.cpp
     src/game/Game.cpp
+    src/game/Game_Update.cpp
+    src/game/Game_Render.cpp
+    src/game/Game_World.cpp
+    src/game/ProcgenValidation.cpp
     src/engine/DebugUI.cpp
     third_party/imgui/imgui_impl_sdl2.cpp
     third_party/imgui/imgui_impl_sdlrenderer2.cpp
