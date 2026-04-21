@@ -481,6 +481,65 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
         room.assignedEnemyCount = 0;
         room.assignedPickupCount = 0;
     }
+
+    auto placeRevealDoorForRoom = [&](const DungeonRoom& room) {
+        struct Candidate {
+            int x;
+            int y;
+            int score;
+        };
+
+        std::vector<Candidate> candidates;
+        const int cx = room.x + room.w / 2;
+        const int cy = room.y + room.h / 2;
+
+        auto addCandidate = [&](int x, int y, int insideX, int insideY, int outsideX, int outsideY) {
+            if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
+            if (insideX < 0 || insideY < 0 || insideX >= width || insideY >= height) return;
+            if (outsideX < 0 || outsideY < 0 || outsideX >= width || outsideY >= height) return;
+
+            const int tile = tiles[idx(x, y)];
+            const int insideTile = tiles[idx(insideX, insideY)];
+            const int outsideTile = tiles[idx(outsideX, outsideY)];
+
+            if (!IsWalkableProcTile(tile)) return;
+            if (!IsWalkableProcTile(insideTile)) return;
+            if (!IsWalkableProcTile(outsideTile)) return;
+
+            if (outsideX >= room.x && outsideX < room.x + room.w &&
+                outsideY >= room.y && outsideY < room.y + room.h) {
+                return;
+            }
+
+            const int score = std::abs(x - cx) + std::abs(y - cy);
+            candidates.push_back({ x, y, score });
+        };
+
+        for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+            addCandidate(x, room.y, x, room.y + 1, x, room.y - 1);
+            addCandidate(x, room.y + room.h - 1, x, room.y + room.h - 2, x, room.y + room.h);
+        }
+
+        for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+            addCandidate(room.x, y, room.x + 1, y, room.x - 1, y);
+            addCandidate(room.x + room.w - 1, y, room.x + room.w - 2, y, room.x + room.w, y);
+        }
+
+        if (candidates.empty()) {
+            return;
+        }
+
+        auto best = std::min_element(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+            return a.score < b.score;
+        });
+
+        tiles[idx(best->x, best->y)] = TileValue(TileType::RevealDoor);
+    };
+
+    for (size_t i = 1; i < m_generatedRooms.size(); ++i) {
+        placeRevealDoorForRoom(m_generatedRooms[i]);
+    }
+
     m_currentRoomIndex = 0;
 
 	return m_map.LoadFromData(width, height, tiles);
@@ -602,6 +661,16 @@ int Game::FindRoomIndexForTile(int tx, int ty) const
             return (int)i;
         }
     }
+
+    // Fallback: allow room border tiles (such as RevealDoor placed in a wall opening)
+    // to resolve to their owning room as well.
+    for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
+        const DungeonRoom& room = m_generatedRooms[i];
+        if (tx >= room.x && tx < room.x + room.w && ty >= room.y && ty < room.y + room.h) {
+            return (int)i;
+        }
+    }
+
     return -1;
 }
 
@@ -710,7 +779,7 @@ void Game::UpdateRoomStateForPlayer(const Vec2& playerPos)
     }
 
     if (room.state == RoomState::Hidden) {
-        RevealRoom(m_currentRoomIndex);
+        return;
     }
 
     RefreshCurrentRoomState();
