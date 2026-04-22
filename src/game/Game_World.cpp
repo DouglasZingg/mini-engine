@@ -482,18 +482,18 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
         room.assignedPickupCount = 0;
     }
 
-    auto placeRevealDoorForRoom = [&](const DungeonRoom& room) {
+    auto placeRevealDoorsForRoom = [&](const DungeonRoom& room) {
         struct Candidate {
             int x;
             int y;
-            int score;
+            int outsideX;
+            int outsideY;
+            int side;
         };
 
         std::vector<Candidate> candidates;
-        const int cx = room.x + room.w / 2;
-        const int cy = room.y + room.h / 2;
 
-        auto addCandidate = [&](int x, int y, int insideX, int insideY, int outsideX, int outsideY) {
+        auto addCandidate = [&](int x, int y, int insideX, int insideY, int outsideX, int outsideY, int side) {
             if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) return;
             if (insideX < 0 || insideY < 0 || insideX >= width || insideY >= height) return;
             if (outsideX < 0 || outsideY < 0 || outsideX >= width || outsideY >= height) return;
@@ -511,33 +511,94 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
                 return;
             }
 
-            const int score = std::abs(x - cx) + std::abs(y - cy);
-            candidates.push_back({ x, y, score });
+            candidates.push_back({ x, y, outsideX, outsideY, side });
         };
 
         for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
-            addCandidate(x, room.y, x, room.y + 1, x, room.y - 1);
-            addCandidate(x, room.y + room.h - 1, x, room.y + room.h - 2, x, room.y + room.h);
+            addCandidate(x, room.y, x, room.y + 1, x, room.y - 1, 0);
+            addCandidate(x, room.y + room.h - 1, x, room.y + room.h - 2, x, room.y + room.h, 1);
         }
 
         for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
-            addCandidate(room.x, y, room.x + 1, y, room.x - 1, y);
-            addCandidate(room.x + room.w - 1, y, room.x + room.w - 2, y, room.x + room.w, y);
+            addCandidate(room.x, y, room.x + 1, y, room.x - 1, y, 2);
+            addCandidate(room.x + room.w - 1, y, room.x + room.w - 2, y, room.x + room.w, y, 3);
         }
 
         if (candidates.empty()) {
             return;
         }
 
-        auto best = std::min_element(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-            return a.score < b.score;
-        });
+        auto rankCandidate = [&](const Candidate& c) {
+            // Prefer openings that lead straight into corridors rather than room-adjacent floor.
+            int openness = 0;
+            if (c.outsideX > 0 && IsWalkableProcTile(tiles[idx(c.outsideX - 1, c.outsideY)])) ++openness;
+            if (c.outsideX < width - 1 && IsWalkableProcTile(tiles[idx(c.outsideX + 1, c.outsideY)])) ++openness;
+            if (c.outsideY > 0 && IsWalkableProcTile(tiles[idx(c.outsideX, c.outsideY - 1)])) ++openness;
+            if (c.outsideY < height - 1 && IsWalkableProcTile(tiles[idx(c.outsideX, c.outsideY + 1)])) ++openness;
+            return openness;
+        };
 
-        tiles[idx(best->x, best->y)] = TileValue(TileType::RevealDoor);
+        // Add a door at every actual entry point. Collapse contiguous openings down to one door
+        // per run so wide openings do not become full door walls.
+        for (int side = 0; side < 4; ++side) {
+            std::vector<Candidate> sideCandidates;
+            for (const Candidate& c : candidates) {
+                if (c.side == side) sideCandidates.push_back(c);
+            }
+            if (sideCandidates.empty()) continue;
+
+            std::sort(sideCandidates.begin(), sideCandidates.end(), [&](const Candidate& a, const Candidate& b) {
+                if (side == 0 || side == 1) {
+                    return a.x < b.x;
+                }
+                return a.y < b.y;
+            });
+
+            std::vector<Candidate> run;
+            auto flushRun = [&]() {
+                if (run.empty()) return;
+                auto best = std::max_element(run.begin(), run.end(), [&](const Candidate& a, const Candidate& b) {
+                    const int ar = rankCandidate(a);
+                    const int br = rankCandidate(b);
+                    if (ar != br) return ar < br;
+                    if (side == 0 || side == 1) {
+                        const int amid = room.x + room.w / 2;
+                        return std::abs(a.x - amid) > std::abs(b.x - amid);
+                    }
+                    const int amid = room.y + room.h / 2;
+                    return std::abs(a.y - amid) > std::abs(b.y - amid);
+                });
+                tiles[idx(best->x, best->y)] = TileValue(TileType::RevealDoor);
+                run.clear();
+            };
+
+            for (const Candidate& c : sideCandidates) {
+                if (run.empty()) {
+                    run.push_back(c);
+                    continue;
+                }
+
+                const Candidate& prev = run.back();
+                const bool contiguous = (side == 0 || side == 1)
+                    ? (c.x == prev.x + 1)
+                    : (c.y == prev.y + 1);
+
+                const bool sameOutsideLine = (c.outsideX == prev.outsideX && c.outsideY == prev.outsideY)
+                    || ((side == 0 || side == 1) ? (c.outsideY == prev.outsideY) : (c.outsideX == prev.outsideX));
+
+                if (contiguous && sameOutsideLine) {
+                    run.push_back(c);
+                } else {
+                    flushRun();
+                    run.push_back(c);
+                }
+            }
+            flushRun();
+        }
     };
 
     for (size_t i = 1; i < m_generatedRooms.size(); ++i) {
-        placeRevealDoorForRoom(m_generatedRooms[i]);
+        placeRevealDoorsForRoom(m_generatedRooms[i]);
     }
 
     m_currentRoomIndex = 0;
