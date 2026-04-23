@@ -36,6 +36,8 @@ public:
     void DrawLine(int x1, int y1, int x2, int y2);
     void DrawFilledRect(int x, int y, int w, int h,
                         std::uint8_t r, std::uint8_t g, std::uint8_t b);
+    void DrawFilledRectAlpha(int x, int y, int w, int h,
+                             std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a);
 
     using SdlEventCallback = void(*)(void* userData, const void* sdlEvent);
     void SetEventCallback(SdlEventCallback cb, void* userData);

@@ -31,6 +31,14 @@ bool Game::Init(SdlPlatform& platform) {
 	ValidateAndSanitizeMap();
 	UpdateWorldSizeFromMap();
 
+	m_initialMapTiles.clear();
+	m_initialMapTiles.reserve(static_cast<size_t>(m_map.Width() * m_map.Height()));
+	for (int ty = 0; ty < m_map.Height(); ++ty) {
+		for (int tx = 0; tx < m_map.Width(); ++tx) {
+			m_initialMapTiles.push_back(m_map.At(tx, ty));
+		}
+	}
+
 	// Load config (speeds, world size, etc.)
 	LoadGameConfig(AssetPath("assets/config.json").c_str(), m_cfg);
 

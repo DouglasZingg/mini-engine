@@ -104,6 +104,7 @@ private:
     Entity& CreateEntity(EntityType type, Vec2 pos, float radius);
 
     Tilemap m_map;
+    std::vector<int> m_initialMapTiles;
 
     bool m_gameOver = false;
     int  m_score = 0;

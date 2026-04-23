@@ -190,9 +190,19 @@ void SdlPlatform::DrawLine(int x1, int y1, int x2, int y2) {
 
 void SdlPlatform::DrawFilledRect(int x, int y, int w, int h,
                                  std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(m_renderer, r, g, b, 255);
     SDL_Rect rc{ x, y, w, h };
     SDL_RenderFillRect(m_renderer, &rc);
+}
+
+void SdlPlatform::DrawFilledRectAlpha(int x, int y, int w, int h,
+                                      std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) {
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(m_renderer, r, g, b, a);
+    SDL_Rect rc{ x, y, w, h };
+    SDL_RenderFillRect(m_renderer, &rc);
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_NONE);
 }
 
 // (Removed) legacy debug test rect helper.

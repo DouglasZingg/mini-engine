@@ -207,6 +207,24 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 	// World (tilemap first, then entities)
 	m_map.Render(platform, m_camera);
 
+    for (const DungeonRoom& room : m_generatedRooms) {
+        if (room.state != RoomState::Hidden) continue;
+
+        const float tileSize = (float)m_map.TileSize();
+        const Vec2 shadeWorldTopLeft{
+            (room.x + 1) * tileSize,
+            (room.y + 1) * tileSize
+        };
+        const Vec2 shadeScreenTopLeft = m_camera.WorldToScreen(shadeWorldTopLeft);
+        const int shadeW = std::max(0, (room.w - 2) * m_map.TileSize());
+        const int shadeH = std::max(0, (room.h - 2) * m_map.TileSize());
+
+        if (shadeW > 0 && shadeH > 0) {
+            platform.DrawFilledRectAlpha((int)shadeScreenTopLeft.x, (int)shadeScreenTopLeft.y,
+                shadeW, shadeH, 0, 0, 0, 150);
+        }
+    }
+
     if (dbg.showUI && !m_generatedRooms.empty()) {
         for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
             const DungeonRoom& room = m_generatedRooms[i];
