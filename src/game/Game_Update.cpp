@@ -417,6 +417,7 @@ if (stunPressed && m_stunCooldownTimer <= 0.0f) {
 	// keep existing
 	ClampPlayerToWorld(player);
 	m_map.ResolveCircleCollision(player.pos, player.radius);
+    ResolveHiddenRoomEntry(player);
     HandlePlayerRoomAndWorldInteractions(player);
 
 	
@@ -814,9 +815,30 @@ void Game::HandlePlayerPickupInteractions(Entity& player)
     }
 }
 
+void Game::ResolveHiddenRoomEntry(Entity& player)
+{
+    const TileCoord tc = m_map.WorldToTile(player.pos);
+    if (!IsTileInsideHiddenRoomInterior(tc.x, tc.y)) {
+        return;
+    }
+
+    // Hidden rooms should be entered through their reveal door. Some generated
+    // corridors can run beside a room edge, so this guard prevents the player
+    // from slipping into hidden room contents through an accidental side opening.
+    player.pos = player.prevPos;
+    player.vel = { 0.0f, 0.0f };
+
+    m_toastText = "USE THE DOOR";
+    m_toastTimer = m_toastDuration;
+}
+
 void Game::HandlePlayerRoomAndWorldInteractions(Entity& player)
 {
     HandlePlayerTileInteractions(player);
+
+    const TileCoord tc = m_map.WorldToTile(player.pos);
+    RevealTileArea(tc.x, tc.y, 1);
+
     UpdateRoomStateForPlayer(player.pos);
 }
 

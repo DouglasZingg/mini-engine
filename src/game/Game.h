@@ -105,6 +105,7 @@ private:
 
     Tilemap m_map;
     std::vector<int> m_initialMapTiles;
+    std::vector<unsigned char> m_revealedTiles;
 
     bool m_gameOver = false;
     int  m_score = 0;
@@ -159,7 +160,12 @@ private:
     };
 
     int FindRoomIndexForTile(int tx, int ty) const;
+    int FindRoomInteriorIndexForTile(int tx, int ty) const;
     int FindRoomIndexAtWorld(const Vec2& worldPos) const;
+    bool IsTileInsideHiddenRoomInterior(int tx, int ty) const;
+    bool IsTileVisiblyRevealed(int tx, int ty) const;
+    void ResetVisibilityMap();
+    void RevealTileArea(int centerTx, int centerTy, int radius);
     void RefreshRoomAssignments();
     void UpdateRoomStateForPlayer(const Vec2& playerPos);
     void RevealRoom(int roomIndex);
@@ -168,6 +174,7 @@ private:
     void HandlePlayerTileInteractions(Entity& player);
     void HandlePlayerPickupInteractions(Entity& player);
     void HandlePlayerRoomAndWorldInteractions(Entity& player);
+    void ResolveHiddenRoomEntry(Entity& player);
 
     std::vector<DungeonRoom> m_generatedRooms;
     int m_currentRoomIndex = -1;

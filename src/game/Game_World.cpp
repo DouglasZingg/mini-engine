@@ -503,10 +503,37 @@ bool Game::GenerateProceduralLevel(int levelIndex) {
         room.assignedPickupCount = 0;
     }
 
-    for (size_t roomIndex = 1; roomIndex < roomDoorTiles.size(); ++roomIndex) {
-        for (const auto& p : roomDoorTiles[roomIndex]) {
-            if (p.first <= 0 || p.second <= 0 || p.first >= width - 1 || p.second >= height - 1) continue;
-            tiles[idx(p.first, p.second)] = TileValue(TileType::RevealDoor);
+    auto tryPlaceDoor = [&](int roomIndex, int bx, int by, int insideX, int insideY, int outsideX, int outsideY) {
+        if (roomIndex < 0 || roomIndex >= (int)rooms.size()) return;
+        if (bx <= 0 || by <= 0 || bx >= width - 1 || by >= height - 1) return;
+        if (insideX <= 0 || insideY <= 0 || insideX >= width - 1 || insideY >= height - 1) return;
+        if (outsideX <= 0 || outsideY <= 0 || outsideX >= width - 1 || outsideY >= height - 1) return;
+
+        const int insideTile = tiles[idx(insideX, insideY)];
+        const int outsideTile = tiles[idx(outsideX, outsideY)];
+        if (!IsWalkableProcTile(insideTile) || !IsWalkableProcTile(outsideTile)) return;
+
+        // Every valid room/corridor opening gets a visible door. That includes
+        // the starting room exits, so players get an immediate cue that halls
+        // lead to new spaces.
+        tiles[idx(bx, by)] = TileValue(TileType::RevealDoor);
+    };
+
+    for (size_t ri = 0; ri < rooms.size(); ++ri) {
+        const ProcRoom& room = rooms[ri];
+
+        for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+            // Top edge
+            tryPlaceDoor((int)ri, x, room.y, x, room.y + 1, x, room.y - 1);
+            // Bottom edge
+            tryPlaceDoor((int)ri, x, room.y + room.h - 1, x, room.y + room.h - 2, x, room.y + room.h);
+        }
+
+        for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+            // Left edge
+            tryPlaceDoor((int)ri, room.x, y, room.x + 1, y, room.x - 1, y);
+            // Right edge
+            tryPlaceDoor((int)ri, room.x + room.w - 1, y, room.x + room.w - 2, y, room.x + room.w, y);
         }
     }
 
@@ -628,17 +655,32 @@ void Game::RestartGame() {
 
 	m_tokensTotal = m_pickupsRemaining;
     RefreshRoomAssignments();
+    ResetVisibilityMap();
+    {
+        const TileCoord playerTile = m_map.WorldToTile(player.pos);
+        RevealTileArea(playerTile.x, playerTile.y, 1);
+    }
     UpdateRoomStateForPlayer(player.pos);
 }
 
 
 
-int Game::FindRoomIndexForTile(int tx, int ty) const
+int Game::FindRoomInteriorIndexForTile(int tx, int ty) const
 {
     for (size_t i = 0; i < m_generatedRooms.size(); ++i) {
         if (TileInsideRoomInterior(m_generatedRooms[i].x, m_generatedRooms[i].y, m_generatedRooms[i].w, m_generatedRooms[i].h, tx, ty)) {
             return (int)i;
         }
+    }
+
+    return -1;
+}
+
+int Game::FindRoomIndexForTile(int tx, int ty) const
+{
+    const int interiorRoom = FindRoomInteriorIndexForTile(tx, ty);
+    if (interiorRoom >= 0) {
+        return interiorRoom;
     }
 
     // Fallback: allow room border tiles (such as RevealDoor placed in a wall opening)
@@ -657,6 +699,70 @@ int Game::FindRoomIndexAtWorld(const Vec2& worldPos) const
 {
     const TileCoord tc = m_map.WorldToTile(worldPos);
     return FindRoomIndexForTile(tc.x, tc.y);
+}
+
+bool Game::IsTileInsideHiddenRoomInterior(int tx, int ty) const
+{
+    const int roomIndex = FindRoomInteriorIndexForTile(tx, ty);
+    if (roomIndex < 0 || roomIndex >= (int)m_generatedRooms.size()) {
+        return false;
+    }
+
+    return m_generatedRooms[roomIndex].state == RoomState::Hidden;
+}
+
+void Game::ResetVisibilityMap()
+{
+    const int w = m_map.Width();
+    const int h = m_map.Height();
+    m_revealedTiles.assign((w > 0 && h > 0) ? (size_t)w * (size_t)h : 0, 0);
+
+    for (const DungeonRoom& room : m_generatedRooms) {
+        if (!(room.isStartRoom || room.state == RoomState::Revealed || room.state == RoomState::Cleared)) {
+            continue;
+        }
+        for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+            for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+                if (x >= 0 && y >= 0 && x < w && y < h) {
+                    m_revealedTiles[(size_t)y * (size_t)w + (size_t)x] = 1;
+                }
+            }
+        }
+    }
+}
+
+void Game::RevealTileArea(int centerTx, int centerTy, int radius)
+{
+    const int w = m_map.Width();
+    const int h = m_map.Height();
+    if (w <= 0 || h <= 0) return;
+    if (m_revealedTiles.size() != (size_t)w * (size_t)h) {
+        ResetVisibilityMap();
+    }
+
+    for (int y = centerTy - radius; y <= centerTy + radius; ++y) {
+        for (int x = centerTx - radius; x <= centerTx + radius; ++x) {
+            if (x < 0 || y < 0 || x >= w || y >= h) continue;
+            const TileType tile = static_cast<TileType>(m_map.At(x, y));
+            if (tile == TileType::Wall) continue;
+            m_revealedTiles[(size_t)y * (size_t)w + (size_t)x] = 1;
+        }
+    }
+}
+
+bool Game::IsTileVisiblyRevealed(int tx, int ty) const
+{
+    const int roomIndex = FindRoomInteriorIndexForTile(tx, ty);
+    if (roomIndex >= 0 && roomIndex < (int)m_generatedRooms.size()) {
+        const DungeonRoom& room = m_generatedRooms[roomIndex];
+        return room.isStartRoom || room.state == RoomState::Revealed || room.state == RoomState::Cleared;
+    }
+
+    const int w = m_map.Width();
+    const int h = m_map.Height();
+    if (tx < 0 || ty < 0 || tx >= w || ty >= h) return false;
+    if (m_revealedTiles.size() != (size_t)w * (size_t)h) return false;
+    return m_revealedTiles[(size_t)ty * (size_t)w + (size_t)tx] != 0;
 }
 
 void Game::RefreshRoomAssignments()
@@ -704,6 +810,16 @@ void Game::RevealRoom(int roomIndex)
     }
 
     room.state = RoomState::Revealed;
+
+    for (int y = room.y + 1; y < room.y + room.h - 1; ++y) {
+        for (int x = room.x + 1; x < room.x + room.w - 1; ++x) {
+            if (x >= 0 && y >= 0 && x < m_map.Width() && y < m_map.Height()) {
+                if (m_revealedTiles.size() == (size_t)m_map.Width() * (size_t)m_map.Height()) {
+                    m_revealedTiles[(size_t)y * (size_t)m_map.Width() + (size_t)x] = 1;
+                }
+            }
+        }
+    }
     m_toastText = room.hasCombatEncounter ? "ROOM REVEALED" : "ROOM DISCOVERED";
     m_toastTimer = m_toastDuration;
 
