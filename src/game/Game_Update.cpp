@@ -89,6 +89,7 @@ const bool cancelPressed  = input.Pressed(Action::Cancel);
 const bool restartPressed = input.Pressed(Action::Restart);
 const bool debugPressed   = input.Pressed(Action::ToggleDebug);
 const bool stunPressed    = input.Pressed(Action::Stun);
+const bool attackPressed  = input.Pressed(Action::Attack);
 // Keep legacy flags in sync for any old render paths
 	m_gameWin = (m_flowState == FlowState::Win);
 	m_gameOver = (m_flowState == FlowState::Lose);
@@ -343,6 +344,14 @@ if (m_flowState == FlowState::Win) {
 		m_stunPulseTimer -= fixedDt;
 		if (m_stunPulseTimer < 0.0f) m_stunPulseTimer = 0.0f;
 	}
+	if (m_attackCooldownTimer > 0.0f) {
+		m_attackCooldownTimer -= fixedDt;
+		if (m_attackCooldownTimer < 0.0f) m_attackCooldownTimer = 0.0f;
+	}
+	if (m_attackArcTimer > 0.0f) {
+		m_attackArcTimer -= fixedDt;
+		if (m_attackArcTimer < 0.0f) m_attackArcTimer = 0.0f;
+	}
 
 	// --------------------
 	// HUD feedback timers (toast + damage flash)
@@ -383,6 +392,11 @@ if (m_flowState == FlowState::Win) {
 		player.vel = player.vel + (desired - player.vel) * (accel * fixedDt);
 	}
 
+
+// Player basic attack: short-range melee hit.
+if (attackPressed && m_attackCooldownTimer <= 0.0f && player.hitstun <= 0.0f) {
+	HandlePlayerAttack(player);
+}
 
 // Player utility move: short-range stun pulse.
 if (stunPressed && m_stunCooldownTimer <= 0.0f) {
@@ -731,6 +745,37 @@ bool Game::DamageEnemy(Entity& enemy, int damage, const Vec2& damageSourcePos)
 
     return false;
 }
+
+void Game::HandlePlayerAttack(Entity& player)
+{
+    m_attackCooldownTimer = m_attackCooldown;
+    m_attackArcTimer = m_attackArcDuration;
+
+    Entity* closestEnemy = nullptr;
+    float closestDistSq = (m_attackRange + 64.0f) * (m_attackRange + 64.0f);
+
+    for (Entity& e : m_entities) {
+        if (!e.active || e.type != EntityType::Enemy) continue;
+
+        Vec2 d = e.pos - player.pos;
+        const float distSq = d.x * d.x + d.y * d.y;
+        const float hitRange = m_attackRange + e.radius;
+        if (distSq <= hitRange * hitRange && distSq < closestDistSq) {
+            closestDistSq = distSq;
+            closestEnemy = &e;
+        }
+    }
+
+    if (closestEnemy) {
+        DamageEnemy(*closestEnemy, 1, player.pos);
+        m_toastText = "HIT";
+        m_toastTimer = 0.35f;
+    } else {
+        m_toastText = "MISS";
+        m_toastTimer = 0.25f;
+    }
+}
+
 
 void Game::HandlePlayerTileInteractions(Entity& player)
 {

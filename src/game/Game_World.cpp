@@ -561,6 +561,10 @@ void Game::RestartGame() {
 	// Reset camera shake
 	m_shakeTime = 0.0f;
 	m_shakeDuration = 0.0f;
+	m_attackCooldownTimer = 0.0f;
+	m_attackArcTimer = 0.0f;
+	m_stunCooldownTimer = 0.0f;
+	m_stunPulseTimer = 0.0f;
 
 	// Restore the original generated map so consumed reveal doors and spent traps reset on death/restart.
 	if (!m_initialMapTiles.empty()) {

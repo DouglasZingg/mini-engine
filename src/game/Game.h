@@ -91,6 +91,13 @@ private:
     float m_stunPulseTimer = 0.0f;
     float m_stunPulseDuration = 0.25f;
 
+    // Player basic attack: short melee swing.
+    float m_attackCooldown = 0.35f;
+    float m_attackCooldownTimer = 0.0f;
+    float m_attackRange = 70.0f;
+    float m_attackArcTimer = 0.0f;
+    float m_attackArcDuration = 0.12f;
+
     std::filesystem::file_time_type m_cfgTimestamp{};
     float m_cfgPollTimer = 0.0f;
 
@@ -171,6 +178,7 @@ private:
     void RevealRoom(int roomIndex);
     void RefreshCurrentRoomState();
     bool DamageEnemy(Entity& enemy, int damage, const Vec2& damageSourcePos);
+    void HandlePlayerAttack(Entity& player);
     void HandlePlayerTileInteractions(Entity& player);
     void HandlePlayerPickupInteractions(Entity& player);
     void HandlePlayerRoomAndWorldInteractions(Entity& player);

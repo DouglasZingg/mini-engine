@@ -138,6 +138,7 @@ bool SdlPlatform::Pump(SdlFrameData& outFrame) {
     m_input.SetKey(Key::Return, keys[SDL_SCANCODE_RETURN] != 0);
     m_input.SetKey(Key::R, keys[SDL_SCANCODE_R] != 0);
     m_input.SetKey(Key::Space, keys[SDL_SCANCODE_SPACE] != 0);
+    m_input.SetKey(Key::J, keys[SDL_SCANCODE_J] != 0);
     m_input.SetKey(Key::F11, keys[SDL_SCANCODE_F11] != 0);
 
     int mouseButtons = SDL_GetMouseState(&m_mouseX, &m_mouseY);

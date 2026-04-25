@@ -145,7 +145,7 @@ void Game::Render(SdlPlatform& platform, float alpha, const DebugState& dbg) {
         // Simple controls page (keep it readable, no fancy layout yet)
         DrawCenteredOverlay(platform, m_assets.Font(),
             "CONTROLS",
-            "WASD: Move   SPACE: Stun",
+            "WASD: Move   J: Attack   SPACE: Stun",
             "TAB: Debug UI   ENTER/ESC: Back"
         );
         return;
@@ -300,6 +300,18 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 			default: break;
 			}
 			platform.DrawFilledRect(drawX, drawY, size, size, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+
+			int maxEnemyHealth = 2;
+			if (e.enemyKind == EnemyKind::Fast) maxEnemyHealth = 1;
+			else if (e.enemyKind == EnemyKind::Tank) maxEnemyHealth = 3;
+			const int barW = size;
+			const int barH = 4;
+			const int barX = drawX;
+			const int barY = drawY - 8;
+			platform.DrawFilledRect(barX, barY, barW, barH, 45, 45, 45);
+			const int hpW = (maxEnemyHealth > 0) ? (barW * std::max(0, e.health) / maxEnemyHealth) : barW;
+			platform.DrawFilledRect(barX, barY, hpW, barH, 220, 45, 45);
+
 			if (e.stunTimer > 0.0f) {
 				platform.DrawFilledRect(drawX + size / 2 - 4, drawY - 10, 8, 8, 80, 220, 255);
 			}
@@ -308,6 +320,13 @@ if (m_playerIndex < 0 || m_playerIndex >= (int)m_entities.size())
 
 
 
+
+// Attack visual so the player can read melee range clearly.
+if (m_attackArcTimer > 0.0f) {
+	const float t = 1.0f - (m_attackArcTimer / m_attackArcDuration);
+	const float radius = std::max(8.0f, m_attackRange * (0.75f + 0.25f * t));
+	DrawPulseDots(platform, m_camera, player.pos, radius, 8, 255, 220, 90);
+}
 
 // Stun pulse visual so the player can read the ability clearly.
 if (m_stunPulseTimer > 0.0f) {
@@ -468,6 +487,14 @@ void Game::DrawHUD(SdlPlatform& platform) const
         platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
         y += glyphH * scale + 6;
     }
+
+    if (m_attackCooldownTimer <= 0.0f) {
+        std::snprintf(line, sizeof(line), "ATTACK J: READY");
+    } else {
+        std::snprintf(line, sizeof(line), "ATTACK J: %.1fs", m_attackCooldownTimer);
+    }
+    platform.DrawTextBMP(m_assets.Font(), x, y, line, glyphW, glyphH, cols, 32, scale);
+    y += glyphH * scale + 6;
 
     if (m_stunCooldownTimer <= 0.0f) {
         std::snprintf(line, sizeof(line), "STUN: READY");
