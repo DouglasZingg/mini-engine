@@ -15,3 +15,5 @@ build\Debug\mini_engine.exe
 
 
 cmake --build build --config Release  
+
+Clear the room and go to next stage
