@@ -885,5 +885,21 @@ void Game::HandlePlayerRoomAndWorldInteractions(Entity& player)
     RevealTileArea(tc.x, tc.y, 1);
 
     UpdateRoomStateForPlayer(player.pos);
+
+	DungeonRoom& room = m_generatedRooms[m_currentRoomIndex];
+
+	if (room.hasCombatEncounter && room.assignedEnemyCount > 0) {
+		room.isLocked = true;
+	}
+
+	if (room.isLocked && room.assignedEnemyCount == 0) {
+		room.isLocked = false;
+		room.state = RoomState::Cleared;
+
+		if (!room.rewardSpawned) {
+			SpawnRewardForRoom(room);
+			room.rewardSpawned = true;
+		}
+	}
 }
 

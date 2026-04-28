@@ -27,6 +27,8 @@ public:
     
     bool RequestedQuit() const { return m_requestQuit; }
 
+    void SpawnRewardForRoom(const DungeonRoom& room);
+
 private:
     void ClampPlayerToWorld(Entity& player) const;
     void UpdateCameraFollow(SdlPlatform& platform, const Entity& player);
@@ -162,6 +164,8 @@ private:
         bool isStartRoom = false;
         bool hasCombatEncounter = false;
         bool hasPickupReward = false;
+        bool isLocked = false;
+        bool rewardSpawned = false;
         int assignedEnemyCount = 0;
         int assignedPickupCount = 0;
     };

@@ -927,4 +927,21 @@ void Game::SpawnPickupAt(const Vec2& worldPos, PickupKind kind)
     }
 }
 
+void Game::SpawnRewardForRoom(const DungeonRoom& room)
+{
+    Vec2 center;
+    center.x = (room.x + room.w / 2) * m_tileSize + m_tileSize / 2;
+    center.y = (room.y + room.h / 2) * m_tileSize + m_tileSize / 2;
 
+    Entity pickup;
+    pickup.active = true;
+    pickup.pos = center;
+
+    // random reward
+    int type = rand() % 3;
+    if (type == 0) pickup.kind = EntityKind::PickupHealth;
+    if (type == 1) pickup.kind = EntityKind::PickupSpeed;
+    if (type == 2) pickup.kind = EntityKind::PickupShield;
+
+    m_entities.push_back(pickup);
+}
